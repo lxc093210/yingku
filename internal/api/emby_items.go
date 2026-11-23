@@ -687,6 +687,28 @@ type authenticateByNameRequest struct {
 	Pw       string `json:"Pw"`
 }
 
+// embyUserDTO is the single synthetic user of this single-user server.
+// Any requested user id resolves to it (same convention as
+// Users/{userId}/Items), which is what Nan's helper probes for.
+func (s *Server) embyUserDTO() map[string]any {
+	return map[string]any{
+		"Id":                    s.ensureServerID(),
+		"Name":                  "yingku",
+		"HasPassword":           false,
+		"HasConfiguredPassword": false,
+		"Configuration":         map[string]any{},
+		"Policy":                map[string]any{"IsAdministrator": true, "EnableAllFolders": true},
+	}
+}
+
+func (s *Server) handleEmbyUser(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, s.embyUserDTO())
+}
+
+func (s *Server) handleEmbyUsers(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, []any{s.embyUserDTO()})
+}
+
 // handleAuthenticateByName answers Emby's by-name login. yingku has no
 // user accounts (single-user LAN server), so the password is not
 // checked; the caller gets the stable server-derived user id and the
