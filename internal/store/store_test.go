@@ -345,13 +345,13 @@ func TestPeopleSettingsAndUserData(t *testing.T) {
 	}
 
 	// Progress -> ContinueWatching (with series name) -> played drops it.
-	if err := st.UpsertProgress(epID, 1, 500_000_000, false, 1700); err != nil {
+	if err := st.UpsertProgress(epID, "1", 500_000_000, false, 1700); err != nil {
 		t.Fatal(err)
 	}
-	if err := st.UpsertProgress(movieID, 1, 900_000_000, false, 1800); err != nil {
+	if err := st.UpsertProgress(movieID, "1", 900_000_000, false, 1800); err != nil {
 		t.Fatal(err)
 	}
-	cont, err := st.ContinueWatching(1, 12)
+	cont, err := st.ContinueWatching("1", 12)
 	if err != nil || len(cont) != 2 {
 		t.Fatalf("continue watching = %+v err %v", cont, err)
 	}
@@ -362,28 +362,28 @@ func TestPeopleSettingsAndUserData(t *testing.T) {
 	if cont[1].SeriesName != "某剧" || cont[1].ProgressTicks != 500_000_000 {
 		t.Errorf("episode entry = %+v", cont[1])
 	}
-	if err := st.UpsertProgress(epID, 1, 3_500_000_000, true, 1900); err != nil {
+	if err := st.UpsertProgress(epID, "1", 3_500_000_000, true, 1900); err != nil {
 		t.Fatal(err)
 	}
-	if cont, _ := st.ContinueWatching(1, 12); len(cont) != 1 || cont[0].Item.ID != movieID {
+	if cont, _ := st.ContinueWatching("1", 12); len(cont) != 1 || cont[0].Item.ID != movieID {
 		t.Fatalf("continue after played = %+v", cont)
 	}
-	ud, err := st.UserDataOf(epID, 1)
+	ud, err := st.UserDataOf(epID, "1")
 	if err != nil || !ud.Played || ud.ProgressTicks != 3_500_000_000 {
 		t.Errorf("user data = %+v err %v", ud, err)
 	}
 	// Reset clears progress but keeps the row readable.
-	if err := st.ResetProgress(epID, 1); err != nil {
+	if err := st.ResetProgress(epID, "1"); err != nil {
 		t.Fatal(err)
 	}
-	if ud, _ := st.UserDataOf(epID, 1); ud.Played || ud.ProgressTicks != 0 {
+	if ud, _ := st.UserDataOf(epID, "1"); ud.Played || ud.ProgressTicks != 0 {
 		t.Errorf("user data after reset = %+v", ud)
 	}
 	// Favorite is independent of progress.
-	if err := st.SetFavorite(movieID, 1, true); err != nil {
+	if err := st.SetFavorite(movieID, "1", true); err != nil {
 		t.Fatal(err)
 	}
-	if ud, _ := st.UserDataOf(movieID, 1); !ud.Favorite || ud.ProgressTicks != 900_000_000 {
+	if ud, _ := st.UserDataOf(movieID, "1"); !ud.Favorite || ud.ProgressTicks != 900_000_000 {
 		t.Errorf("movie user data = %+v", ud)
 	}
 }
@@ -568,18 +568,18 @@ func TestFavoritesAndThumbs(t *testing.T) {
 
 	// Favorites: top-level only (the favorited episode stays out).
 	for _, id := range []int64{m2, s1, ep} {
-		if err := st.SetFavorite(id, 1, true); err != nil {
+		if err := st.SetFavorite(id, "1", true); err != nil {
 			t.Fatal(err)
 		}
 	}
-	favs, err := st.Favorites(1)
+	favs, err := st.Favorites("1")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(favs) != 2 || favs[0].ID != m2 || favs[1].ID != s1 {
 		t.Fatalf("favorites = %+v, want [m2 s1]", favs)
 	}
-	if favs, _ := st.Favorites(2); len(favs) != 0 {
+	if favs, _ := st.Favorites("2"); len(favs) != 0 {
 		t.Errorf("other user's favorites = %d, want 0", len(favs))
 	}
 

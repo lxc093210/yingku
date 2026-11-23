@@ -354,11 +354,26 @@ func TestEmbySessionsReporting(t *testing.T) {
 }
 
 func TestAuthenticateByName(t *testing.T) {
-	h := testHandler(t)
-	key := fetchKey(t, h)
+	h, st := userTestHandler(t)
+	created, err := st.CreateUser("nanuser", "s3cret-pw", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Wrong password, unknown user and empty body are all rejected:
+	// batch 12 made this a real credential check.
+	for _, body := range []string{
+		`{"Username":"nanuser","Pw":"wrong"}`,
+		`{"Username":"ghost","Pw":"s3cret-pw"}`,
+		``,
+	} {
+		if code, respBody := doReq(t, h, http.MethodPost, "/emby/Users/AuthenticateByName", body); code != 401 {
+			t.Errorf("AuthenticateByName %q = %d %s, want 401", body, code, respBody)
+		}
+	}
 
 	code, body := doReq(t, h, http.MethodPost, "/emby/Users/AuthenticateByName",
-		`{"Username":"nanuser","Pw":"not-checked"}`)
+		`{"Username":"nanuser","Pw":"s3cret-pw"}`)
 	if code != 200 {
 		t.Fatalf("AuthenticateByName = %d %s", code, body)
 	}
@@ -378,24 +393,29 @@ func TestAuthenticateByName(t *testing.T) {
 	if err := json.Unmarshal(body, &resp); err != nil {
 		t.Fatal(err)
 	}
-	if resp.User.Name != "nanuser" || resp.User.Id == "" {
-		t.Errorf("user = %+v", resp.User)
+	if resp.User.Name != "nanuser" || resp.User.Id != created.ID {
+		t.Errorf("user = %+v, want id %q", resp.User, created.ID)
 	}
-	if resp.AccessToken != key {
-		t.Errorf("AccessToken = %q, want the api key", resp.AccessToken)
+	if !resp.User.HasPassword || !resp.User.HasConfiguredPassword {
+		t.Errorf("user password flags = %+v, want both true", resp.User)
+	}
+	// The access token is a per-user token, NOT the server API key,
+	// and it resolves back to this user.
+	if resp.AccessToken == "" || resp.AccessToken == fetchKey(t, h) {
+		t.Errorf("AccessToken = %q, want a fresh per-user token", resp.AccessToken)
 	}
 	if resp.SessionInfo.UserId != resp.User.Id || resp.SessionInfo.Id != "yk-session" {
 		t.Errorf("session = %+v", resp.SessionInfo)
 	}
-	// The user id is the stable server id from System/Info.
-	var info systemInfoDTO
-	if code := get(t, h, "/emby/System/Info", &info); code != 200 || info.Id != resp.User.Id {
-		t.Errorf("System/Info Id = %q, auth user id = %q", info.Id, resp.User.Id)
+	code, body = reqWith(t, h, http.MethodGet, "/api/auth/me",
+		map[string]string{"X-Emby-Token": resp.AccessToken})
+	if code != 200 || !strings.Contains(string(body), `"name":"nanuser"`) {
+		t.Errorf("me with login token = %d %s", code, body)
 	}
-	// Empty body still authenticates as the default user.
-	if code, body := doReq(t, h, http.MethodPost, "/Users/AuthenticateByName", ""); code != 200 ||
-		!strings.Contains(string(body), `"Name":"yingku"`) {
-		t.Errorf("default auth = %d %s", code, body)
+	// The root-level alias enforces the same check.
+	if code, _ := doReq(t, h, http.MethodPost, "/Users/AuthenticateByName",
+		`{"Username":"nanuser","Pw":"wrong"}`); code != 401 {
+		t.Errorf("alias wrong-password = %d, want 401", code)
 	}
 }
 
@@ -419,7 +439,7 @@ func TestEmbyPublicAndUnknownPaths(t *testing.T) {
 
 	// Unknown Emby sub-paths answer JSON 404, never the SPA page — the
 	// HTML fallthrough is what produced Nan's `invalid character '<'`.
-	for _, p := range []string{"/emby/Shows/NextUp", "/emby/Library/Whatever", "/Items/999999999", "/emby/Items/999999999"} {
+	for _, p := range []string{"/emby/Library/Whatever", "/Items/999999999", "/emby/Items/999999999"} {
 		code, body := reqWith(t, h, http.MethodGet, p, nil)
 		if code != 404 {
 			t.Errorf("GET %s = %d, want 404", p, code)

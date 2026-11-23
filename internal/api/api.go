@@ -26,8 +26,10 @@ import (
 	"yingku/internal/web"
 )
 
-// defaultUserID is the single local user (the web UI has no accounts yet).
-const defaultUserID = 1
+// defaultUserID is the legacy implicit user: the user_data owner from
+// before accounts existed (batch 12), kept as the attribution fallback
+// while no accounts exist. It equals store.LegacyUserID.
+const defaultUserID = store.LegacyUserID
 
 // settingTMDBKey is the app_settings key holding the TMDB API key.
 const settingTMDBKey = "tmdb_api_key"
@@ -83,6 +85,17 @@ func New(st *store.Store, scanner *scan.Scanner, defaultRoot string) http.Handle
 	mux.HandleFunc("PUT /api/settings", s.handleSettingsPut)
 	mux.HandleFunc("GET /api/settings/api-key", s.handleAPIKeyGet)
 	mux.HandleFunc("POST /api/settings/api-key/regenerate", s.handleAPIKeyRegenerate)
+	// Accounts (batch 12): web login/logout/session probe, the one-time
+	// bootstrap that creates the first administrator, and the admin
+	// user-management surface.
+	mux.HandleFunc("GET /api/auth/me", s.handleAuthMe)
+	mux.HandleFunc("POST /api/auth/login", s.handleAuthLogin)
+	mux.HandleFunc("POST /api/auth/logout", s.handleAuthLogout)
+	mux.HandleFunc("POST /api/users/bootstrap", s.handleUserBootstrap)
+	mux.HandleFunc("GET /api/users", s.handleUsersList)
+	mux.HandleFunc("POST /api/users", s.handleUserCreate)
+	mux.HandleFunc("DELETE /api/users/{id}", s.handleUserDelete)
+	mux.HandleFunc("POST /api/users/{id}/password", s.handleUserPassword)
 	// Emby-protocol handshake surface (Nan / Emby clients register here).
 	mux.HandleFunc("GET /emby/System/Info", s.handleSystemInfo)
 	mux.HandleFunc("GET /System/Info", s.handleSystemInfo)
@@ -127,6 +140,33 @@ func New(st *store.Store, scanner *scan.Scanner, defaultRoot string) http.Handle
 	mux.HandleFunc("POST /Sessions/Playing/Progress", s.handleSessionReport)
 	mux.HandleFunc("POST /emby/Sessions/Playing/Stopped", s.handleSessionReport)
 	mux.HandleFunc("POST /Sessions/Playing/Stopped", s.handleSessionReport)
+	// Emby client mount surface (batch 11): the endpoints SenPlayer /
+	// Infuse call right after login — Views is their first stop, and
+	// its absence read as a bare 404 on mount. Same dual registration.
+	mux.HandleFunc("GET /emby/Users/{userId}/Views", s.handleViews)
+	mux.HandleFunc("GET /Users/{userId}/Views", s.handleViews)
+	mux.HandleFunc("GET /emby/Users/{userId}/Items/Latest", s.handleEmbyLatest)
+	mux.HandleFunc("GET /Users/{userId}/Items/Latest", s.handleEmbyLatest)
+	mux.HandleFunc("GET /emby/Items/Latest", s.handleEmbyLatest)
+	mux.HandleFunc("GET /Items/Latest", s.handleEmbyLatest)
+	mux.HandleFunc("GET /emby/Users/{userId}/Items/Resume", s.handleEmbyResume)
+	mux.HandleFunc("GET /Users/{userId}/Items/Resume", s.handleEmbyResume)
+	mux.HandleFunc("GET /emby/Items/Resume", s.handleEmbyResume)
+	mux.HandleFunc("GET /Items/Resume", s.handleEmbyResume)
+	mux.HandleFunc("GET /emby/Shows/NextUp", s.handleNextUp)
+	mux.HandleFunc("GET /Shows/NextUp", s.handleNextUp)
+	mux.HandleFunc("GET /emby/Search/Hints", s.handleSearchHints)
+	mux.HandleFunc("GET /Search/Hints", s.handleSearchHints)
+	mux.HandleFunc("GET /emby/System/Endpoint", s.handleSystemEndpoint)
+	mux.HandleFunc("GET /System/Endpoint", s.handleSystemEndpoint)
+	mux.HandleFunc("POST /emby/Users/{userId}/FavoriteItems/{itemId}", s.handleFavoriteItems)
+	mux.HandleFunc("POST /Users/{userId}/FavoriteItems/{itemId}", s.handleFavoriteItems)
+	mux.HandleFunc("DELETE /emby/Users/{userId}/FavoriteItems/{itemId}", s.handleFavoriteItems)
+	mux.HandleFunc("DELETE /Users/{userId}/FavoriteItems/{itemId}", s.handleFavoriteItems)
+	mux.HandleFunc("POST /emby/Users/{userId}/PlayedItems/{itemId}", s.handlePlayedItems)
+	mux.HandleFunc("POST /Users/{userId}/PlayedItems/{itemId}", s.handlePlayedItems)
+	mux.HandleFunc("DELETE /emby/Users/{userId}/PlayedItems/{itemId}", s.handlePlayedItems)
+	mux.HandleFunc("DELETE /Users/{userId}/PlayedItems/{itemId}", s.handlePlayedItems)
 	mux.HandleFunc("GET /api/search", s.handleSearch)
 	mux.HandleFunc("GET /api/fs/list", s.handleFSList)
 	mux.HandleFunc("POST /api/scan", s.handleScanStart)
@@ -341,7 +381,7 @@ func (s *Server) handleHome(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	libDTOs := s.libraryDTOs(libs)
-	cont, err := s.st.ContinueWatching(defaultUserID, 12)
+	cont, err := s.st.ContinueWatching(s.currentUserID(r), 12)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
@@ -372,9 +412,9 @@ func (s *Server) handleLibraries(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, s.libraryDTOs(libs))
 }
 
-// handleFavorites lists the default user's favorited top-level items.
+// handleFavorites lists the current user's favorited top-level items.
 func (s *Server) handleFavorites(w http.ResponseWriter, r *http.Request) {
-	items, err := s.st.Favorites(defaultUserID)
+	items, err := s.st.Favorites(s.currentUserID(r))
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
@@ -659,7 +699,7 @@ func (s *Server) handleItem(w http.ResponseWriter, r *http.Request) {
 				}
 				// Per-episode watched/progress state for the detail page's
 				// episode list and resume line.
-				eud, err := s.st.UserDataOf(ep.ID, defaultUserID)
+				eud, err := s.st.UserDataOf(ep.ID, s.currentUserID(r))
 				if err != nil {
 					writeErr(w, http.StatusInternalServerError, err.Error())
 					return
@@ -718,7 +758,7 @@ func (s *Server) handleItem(w http.ResponseWriter, r *http.Request) {
 	for _, p := range people {
 		d.People = append(d.People, toPersonDTO(p))
 	}
-	ud, err := s.st.UserDataOf(it.ID, defaultUserID)
+	ud, err := s.st.UserDataOf(it.ID, s.currentUserID(r))
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
@@ -785,7 +825,7 @@ func (s *Server) handlePlayInfo(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	var pos int64
-	if ud, err := s.st.UserDataOf(target.ID, defaultUserID); err == nil && ud != nil && !ud.Played {
+	if ud, err := s.st.UserDataOf(target.ID, s.currentUserID(r)); err == nil && ud != nil && !ud.Played {
 		pos = ud.ProgressTicks
 	}
 	out["PositionTicks"] = pos
@@ -885,7 +925,7 @@ func (s *Server) handleProgress(w http.ResponseWriter, r *http.Request) {
 	}
 	ticks := int64(p.PositionSeconds * 10_000_000)
 	played := p.DurationSeconds > 0 && p.PositionSeconds/p.DurationSeconds >= 0.9
-	if err := s.st.UpsertProgress(id, defaultUserID, ticks, played, time.Now().Unix()); err != nil {
+	if err := s.st.UpsertProgress(id, s.currentUserID(r), ticks, played, time.Now().Unix()); err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -907,7 +947,7 @@ func (s *Server) handleProgressReset(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusNotFound, "item not found")
 		return
 	}
-	if err := s.st.ResetProgress(id, defaultUserID); err != nil {
+	if err := s.st.ResetProgress(id, s.currentUserID(r)); err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -936,7 +976,7 @@ func (s *Server) handleFavorite(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "invalid JSON body")
 		return
 	}
-	if err := s.st.SetFavorite(id, defaultUserID, p.Favorite); err != nil {
+	if err := s.st.SetFavorite(id, s.currentUserID(r), p.Favorite); err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -1192,7 +1232,7 @@ func (s *Server) handleScanStatus(w http.ResponseWriter, r *http.Request) {
 // asked for a not-yet-implemented /emby/* path.
 var json404Prefixes = []string{
 	"/api/", "/emby/", "/System/", "/Users/", "/Library/",
-	"/Items/", "/Videos/", "/Sessions/",
+	"/Items/", "/Videos/", "/Sessions/", "/Shows/", "/Search/",
 }
 
 func (s *Server) handleUI(w http.ResponseWriter, r *http.Request) {

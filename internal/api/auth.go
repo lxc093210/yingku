@@ -8,21 +8,26 @@ import (
 	"net/http"
 	"regexp"
 	"strings"
+
+	"yingku/internal/store"
 )
 
-// ---- API key & Emby-style auth ----
+// ---- API key, user tokens & Emby-style auth ----
 //
-// yingku is a single-user LAN server. The API key exists so companion
-// software (Nan's Emby helper, MoviePilot, Emby clients) can authenticate
-// the way they would against a real Emby server: an `api_key` query
-// parameter, an `X-Emby-Token` header, or an `X-Emby-Authorization`
-// header carrying Token="…".
+// Two credential classes ride the same Emby-style carriers (an
+// `api_key` query parameter, an `X-Emby-Token` header, or an
+// `X-Emby-Authorization` header carrying Token="…"):
+//
+//   - the server API key, for companion software (Nan's Emby helper,
+//     MoviePilot) calling server-to-server;
+//   - per-user access tokens issued at login (batch 12), which pin the
+//     request's watch state to that account.
 //
 // Enforcement is opt-in: while app_settings `api_auth_required` is not
 // "true" (the default), credentials are only *recognized* (recorded in
-// the request context) and every request passes, so the key-less web UI
-// keeps working. When the user flips the switch, API requests without a
-// valid key get 401 — static pages and /api/health stay open.
+// the request context) and every request passes. When the user flips
+// the switch, API requests without a valid credential get 401 —
+// static pages and the login/bootstrap endpoints stay open.
 
 const (
 	// settingAPIKey is the app_settings key holding the API key.
@@ -130,12 +135,63 @@ func keyMatches(presented, stored string) bool {
 
 type ctxKeyAuthed struct{}
 
-// requestAuthed reports whether the request presented a valid API key.
-// Handlers can use it to distinguish key-authenticated companions (Nan,
-// clients) from anonymous web-UI traffic once enforcement exists.
+// authInfo is what the middleware resolved from the request's
+// credential: either the server API key (Nan's server-to-server calls)
+// or a per-user access token issued at login (batch 12).
+type authInfo struct {
+	authed bool   // any valid credential was presented
+	server bool   // the credential was the server API key
+	userID string // token owner, when the credential was a user token
+	token  string // presented user token (for logout/revoke), "" otherwise
+}
+
+// requestAuthed reports whether the request presented a valid
+// credential (server key or user token). Handlers can use it to
+// distinguish authenticated companions (Nan, clients) from anonymous
+// web-UI traffic once enforcement exists.
 func requestAuthed(r *http.Request) bool {
-	v, _ := r.Context().Value(ctxKeyAuthed{}).(bool)
-	return v
+	info, _ := r.Context().Value(ctxKeyAuthed{}).(authInfo)
+	return info.authed
+}
+
+// isServerCred reports whether the request authenticated with the
+// server API key (as opposed to a per-user token or nothing).
+func isServerCred(r *http.Request) bool {
+	info, _ := r.Context().Value(ctxKeyAuthed{}).(authInfo)
+	return info.server
+}
+
+// presentedUserToken returns the user access token the request
+// carried ("" for server-key or anonymous requests).
+func presentedUserToken(r *http.Request) string {
+	info, _ := r.Context().Value(ctxKeyAuthed{}).(authInfo)
+	return info.token
+}
+
+// currentUserID resolves the account a request's watch state belongs
+// to: the token's owner for user-token requests; otherwise (server
+// key, or no credential while enforcement is off) the first
+// administrator; and while no accounts exist at all, the legacy
+// default user so pre-account data keeps flowing.
+func (s *Server) currentUserID(r *http.Request) string {
+	info, _ := r.Context().Value(ctxKeyAuthed{}).(authInfo)
+	if info.userID != "" {
+		return info.userID
+	}
+	if admin, err := s.st.FirstAdmin(); err == nil && admin != nil {
+		return admin.ID
+	}
+	return defaultUserID
+}
+
+// currentUser resolves the account behind currentUserID (nil while no
+// accounts exist, or when the id names no real user).
+func (s *Server) currentUser(r *http.Request) *store.User {
+	u, err := s.st.GetUserByID(s.currentUserID(r))
+	if err != nil {
+		return nil
+	}
+	return u
 }
 
 // isAPIPath reports whether path is an API surface (as opposed to the
@@ -143,7 +199,7 @@ func requestAuthed(r *http.Request) bool {
 // root-level Emby routes.
 func isAPIPath(path string) bool {
 	for _, p := range []string{"/api/", "/emby/", "/System/", "/Users/",
-		"/Library/", "/Items/", "/Videos/", "/Sessions/"} {
+		"/Library/", "/Items/", "/Videos/", "/Sessions/", "/Shows/", "/Search/"} {
 		if strings.HasPrefix(path, p) {
 			return true
 		}
@@ -151,16 +207,40 @@ func isAPIPath(path string) bool {
 	return false
 }
 
-// authMiddleware recognizes Emby-style credentials on every request and
-// records the outcome in the request context. It only rejects when the
-// user has switched enforcement on (api_auth_required=true); then API
-// requests without a valid key get 401, while static pages and
-// /api/health stay reachable so the UI can load and liveness checks work.
+// authExemptPath lists the endpoints that must stay reachable without
+// any credential even when enforcement is on: liveness, the login
+// endpoints themselves (they are how credentials are obtained), the
+// frontend's session probe, and the one-time bootstrap.
+func authExemptPath(path string) bool {
+	switch path {
+	case "/api/health", "/api/auth/login", "/api/auth/me", "/api/users/bootstrap":
+		return true
+	}
+	return strings.HasSuffix(path, "/Users/AuthenticateByName")
+}
+
+// authMiddleware recognizes Emby-style credentials on every request
+// and records the outcome in the request context: a presented value
+// matching the server API key is a server credential; otherwise it is
+// tried as a per-user access token. It only rejects when the user has
+// switched enforcement on (api_auth_required=true); then API requests
+// without a valid credential get 401, while static pages and the
+// exempt endpoints stay reachable so the UI can load and users can
+// log in.
 func (s *Server) authMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		authed := keyMatches(presentedKey(r), s.currentAPIKey())
-		r = r.WithContext(context.WithValue(r.Context(), ctxKeyAuthed{}, authed))
-		if s.authRequired() && !authed && isAPIPath(r.URL.Path) && r.URL.Path != "/api/health" {
+		presented := presentedKey(r)
+		info := authInfo{}
+		switch {
+		case keyMatches(presented, s.currentAPIKey()):
+			info.authed, info.server = true, true
+		case presented != "":
+			if uid, ok, err := s.st.ResolveToken(presented); err == nil && ok {
+				info.authed, info.userID, info.token = true, uid, presented
+			}
+		}
+		r = r.WithContext(context.WithValue(r.Context(), ctxKeyAuthed{}, info))
+		if s.authRequired() && !info.authed && isAPIPath(r.URL.Path) && !authExemptPath(r.URL.Path) {
 			writeErr(w, http.StatusUnauthorized, "unauthorized: valid api key required")
 			return
 		}

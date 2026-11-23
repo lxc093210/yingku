@@ -984,7 +984,7 @@ type UserData struct {
 }
 
 // UserDataOf returns the user's state for an item (zero value when none).
-func (s *Store) UserDataOf(itemID, userID int64) (*UserData, error) {
+func (s *Store) UserDataOf(itemID int64, userID string) (*UserData, error) {
 	var ud UserData
 	var played, favorite int
 	err := s.db.QueryRow(`SELECT progress_ticks, played, favorite, last_played_at
@@ -1002,7 +1002,7 @@ func (s *Store) UserDataOf(itemID, userID int64) (*UserData, error) {
 }
 
 // UpsertProgress records playback progress for an item.
-func (s *Store) UpsertProgress(itemID, userID, ticks int64, played bool, lastPlayedAt int64) error {
+func (s *Store) UpsertProgress(itemID int64, userID string, ticks int64, played bool, lastPlayedAt int64) error {
 	_, err := s.db.Exec(`INSERT INTO user_data(item_id, user_id, progress_ticks, played, favorite, last_played_at)
 		VALUES (?, ?, ?, ?, 0, ?)
 		ON CONFLICT(item_id, user_id) DO UPDATE SET
@@ -1014,7 +1014,7 @@ func (s *Store) UpsertProgress(itemID, userID, ticks int64, played bool, lastPla
 }
 
 // ResetProgress clears progress/played for an item (favorite is kept).
-func (s *Store) ResetProgress(itemID, userID int64) error {
+func (s *Store) ResetProgress(itemID int64, userID string) error {
 	_, err := s.db.Exec(`INSERT INTO user_data(item_id, user_id, progress_ticks, played, favorite, last_played_at)
 		VALUES (?, ?, 0, 0, 0, 0)
 		ON CONFLICT(item_id, user_id) DO UPDATE SET
@@ -1023,7 +1023,7 @@ func (s *Store) ResetProgress(itemID, userID int64) error {
 }
 
 // SetFavorite sets the favorite flag for an item.
-func (s *Store) SetFavorite(itemID, userID int64, favorite bool) error {
+func (s *Store) SetFavorite(itemID int64, userID string, favorite bool) error {
 	_, err := s.db.Exec(`INSERT INTO user_data(item_id, user_id, progress_ticks, played, favorite, last_played_at)
 		VALUES (?, ?, 0, 0, ?, 0)
 		ON CONFLICT(item_id, user_id) DO UPDATE SET favorite = excluded.favorite`,
@@ -1040,7 +1040,7 @@ func boolInt(b bool) int {
 
 // Favorites returns the user's favorited top-level items (movies and
 // series), ordered by title for the favorites view.
-func (s *Store) Favorites(userID int64) ([]*Item, error) {
+func (s *Store) Favorites(userID string) ([]*Item, error) {
 	rows, err := s.db.Query(`SELECT `+itemCols+` FROM items
 		JOIN user_data ud ON ud.item_id = items.id AND ud.user_id = ?
 		WHERE ud.favorite = 1 AND items.parent_id IS NULL
@@ -1107,7 +1107,7 @@ type ContinueEntry struct {
 
 // ContinueWatching lists in-progress (started, not finished) movies and
 // episodes for the user, most recently played first.
-func (s *Store) ContinueWatching(userID int64, limit int) ([]ContinueEntry, error) {
+func (s *Store) ContinueWatching(userID string, limit int) ([]ContinueEntry, error) {
 	if limit <= 0 || limit > 50 {
 		limit = 12
 	}

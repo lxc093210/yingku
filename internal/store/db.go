@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	_ "modernc.org/sqlite"
 )
@@ -67,6 +68,39 @@ func Open(path string) (*Store, error) {
 			return nil, fmt.Errorf("migrate user_data last_played_at: %w", err)
 		}
 	}
+	// Migration (batch 12): user_data.user_id was INTEGER (the single
+	// implicit user, id 1) before real accounts existed; users.id is a
+	// TEXT key, so the column is rebuilt as TEXT, values cast ('1'
+	// stays '1' and keeps matching LegacyUserID until the first admin
+	// adopts the rows). Runs after the last_played_at migration so the
+	// copy below can name every column.
+	uidType, err := columnType(db, "user_data", "user_id")
+	if err != nil {
+		db.Close()
+		return nil, fmt.Errorf("migrate user_data user_id: %w", err)
+	}
+	if uidType != "" && !strings.EqualFold(uidType, "TEXT") {
+		for _, stmt := range []string{
+			`CREATE TABLE user_data_text (
+				item_id        INTEGER NOT NULL REFERENCES items(id) ON DELETE CASCADE,
+				user_id        TEXT NOT NULL,
+				progress_ticks INTEGER NOT NULL DEFAULT 0,
+				played         INTEGER NOT NULL DEFAULT 0,
+				favorite       INTEGER NOT NULL DEFAULT 0,
+				last_played_at INTEGER NOT NULL DEFAULT 0,
+				PRIMARY KEY (item_id, user_id)
+			)`,
+			`INSERT INTO user_data_text(item_id, user_id, progress_ticks, played, favorite, last_played_at)
+				SELECT item_id, CAST(user_id AS TEXT), progress_ticks, played, favorite, last_played_at FROM user_data`,
+			`DROP TABLE user_data`,
+			`ALTER TABLE user_data_text RENAME TO user_data`,
+		} {
+			if _, err := db.Exec(stmt); err != nil {
+				db.Close()
+				return nil, fmt.Errorf("migrate user_data user_id to TEXT: %w", err)
+			}
+		}
+	}
 	// Migration: items gained date_added (newest source-file mtime, used
 	// by the "latest additions" ordering). The companion index can only be
 	// created once the column exists, so it lives here, not in the schema.
@@ -101,6 +135,25 @@ func Open(path string) (*Store, error) {
 		}
 	}
 	return s, nil
+}
+
+// columnType returns the declared type of a column ("" when absent).
+func columnType(db *sql.DB, table, column string) (string, error) {
+	rows, err := db.Query(`SELECT name, type FROM pragma_table_info(?)`, table)
+	if err != nil {
+		return "", err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var name, typ string
+		if err := rows.Scan(&name, &typ); err != nil {
+			return "", err
+		}
+		if name == column {
+			return typ, nil
+		}
+	}
+	return "", rows.Err()
 }
 
 // columnExists reports whether table has a column of the given name.
@@ -227,14 +280,35 @@ CREATE TABLE IF NOT EXISTS app_settings (
 );
 
 -- User playback state lives apart from items so rescans never touch it.
+-- user_id is the users.id TEXT key (batch 12); pre-batch-12 databases
+-- declared it INTEGER and are rebuilt by the migration in Open.
 CREATE TABLE IF NOT EXISTS user_data (
   item_id        INTEGER NOT NULL REFERENCES items(id) ON DELETE CASCADE,
-  user_id        INTEGER NOT NULL,
+  user_id        TEXT NOT NULL,
   progress_ticks INTEGER NOT NULL DEFAULT 0,
   played         INTEGER NOT NULL DEFAULT 0,
   favorite       INTEGER NOT NULL DEFAULT 0,
   last_played_at INTEGER NOT NULL DEFAULT 0, -- unix seconds, 0 = never
   PRIMARY KEY (item_id, user_id)
+);
+
+-- Accounts (batch 12): one row per login-able user. password_hash is a
+-- PBKDF2-HMAC-SHA256 digest string, never a plaintext password.
+CREATE TABLE IF NOT EXISTS users (
+  id            TEXT PRIMARY KEY, -- 32 hex chars, same shape as server_id
+  name          TEXT NOT NULL UNIQUE,
+  password_hash TEXT NOT NULL DEFAULT '',
+  is_admin      INTEGER NOT NULL DEFAULT 0,
+  created_at    INTEGER NOT NULL DEFAULT 0 -- unix seconds
+);
+
+-- Issued access tokens, one per login (device). Only the SHA-256 hex
+-- of the token is stored, so a database leak does not leak sessions.
+CREATE TABLE IF NOT EXISTS access_tokens (
+  token_hash   TEXT PRIMARY KEY, -- SHA-256 hex of the token
+  user_id      TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  created_at   INTEGER NOT NULL DEFAULT 0, -- unix seconds
+  last_used_at INTEGER NOT NULL DEFAULT 0  -- unix seconds, throttled writes
 );
 
 CREATE VIRTUAL TABLE IF NOT EXISTS items_fts USING fts5(

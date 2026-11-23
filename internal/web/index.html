@@ -53,10 +53,10 @@
 
   /* ---------- drawer ---------- */
   #drawerShade{position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:90;
-    opacity:0;pointer-events:none;transition:opacity .22s}
+    opacity:0;pointer-events:none;transition:opacity .24s ease-out}
   #drawerShade.open{opacity:1;pointer-events:auto}
   #drawer{position:fixed;top:0;left:0;bottom:0;width:272px;z-index:95;background:#131518;
-    border-right:1px solid var(--line);transform:translateX(-100%);transition:transform .24s;
+    border-right:1px solid var(--line);transform:translateX(-100%);transition:transform .26s ease-out;
     overflow-y:auto;padding:18px 0}
   #drawer.open{transform:translateX(0)}
   #drawer .dlogo{display:flex;align-items:center;gap:8px;font-size:19px;font-weight:800;
@@ -107,7 +107,7 @@
   .rowhead h2{font-size:19px;margin:0;font-weight:700}
   .rowhead h2.clickable{cursor:pointer}
   .rowhead h2.clickable:hover{color:#fff;text-decoration:underline}
-  .rail{display:flex;gap:12px;overflow-x:auto;padding:10px 4% 16px;scrollbar-width:none}
+  .rail{display:flex;gap:12px;overflow-x:auto;padding:10px 4% 16px;scrollbar-width:none;scroll-behavior:smooth}
   .rail::-webkit-scrollbar{display:none}
   .card{flex:none;width:158px;cursor:pointer}
   .pwrap{position:relative;width:100%;aspect-ratio:2/3;border-radius:10px;overflow:hidden;
@@ -129,7 +129,7 @@
   .libcard{cursor:pointer}
   .lmain{position:relative;width:100%;aspect-ratio:2/1;border-radius:10px;overflow:hidden;
     background:var(--panel);transition:transform .18s,box-shadow .18s}
-  .libcard:hover .lmain{transform:scale(1.02);box-shadow:0 12px 30px rgba(0,0,0,.55)}
+  .libcard:hover .lmain{transform:scale(1.03);box-shadow:0 12px 30px rgba(0,0,0,.55)}
   .lmain img.lbg{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;opacity:.5}
   .lmain .lshade{position:absolute;inset:0;
     background:linear-gradient(90deg,rgba(10,10,12,.88) 30%,rgba(10,10,12,.35) 62%,rgba(10,10,12,.15))}
@@ -205,10 +205,12 @@
   .mi .mirow{display:flex;gap:16px;padding:7px 0;border-bottom:1px solid var(--line);font-size:13.5px}
   .mi .mirow span{width:76px;flex:none;color:var(--muted)}
   .mi .mirow b{font-weight:600;color:#e6e8eb}
-  .seasonrail{display:flex;gap:14px;overflow-x:auto;padding-bottom:8px;scrollbar-width:none}
+  .seasonrail{display:flex;gap:14px;overflow-x:auto;padding-bottom:8px;scrollbar-width:none;scroll-behavior:smooth}
   .seasonrail::-webkit-scrollbar{display:none}
   .scard{flex:none;width:132px;cursor:pointer}
-  .scard .swrap{position:relative;width:100%;aspect-ratio:2/3;border-radius:9px;overflow:hidden;background:var(--panel)}
+  .scard .swrap{position:relative;width:100%;aspect-ratio:2/3;border-radius:9px;overflow:hidden;background:var(--panel);
+    transition:transform .18s,box-shadow .18s}
+  .scard:hover .swrap{transform:scale(1.04);box-shadow:0 10px 24px rgba(0,0,0,.5)}
   .scard img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;display:block;z-index:1}
   .scard .fb{position:absolute;inset:0;z-index:0;display:flex;align-items:center;justify-content:center;
     padding:10px;text-align:center;font-size:14px;font-weight:700;color:rgba(255,255,255,.92)}
@@ -217,7 +219,8 @@
   .scard .snm{margin-top:7px;font-size:13px;text-align:center;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .scard.on .swrap{box-shadow:0 0 0 2px var(--green)}
   .eplist{display:flex;flex-direction:column;margin-top:6px}
-  .ep{display:flex;gap:13px;align-items:center;padding:11px 8px;border-bottom:1px solid var(--line);cursor:pointer}
+  .ep{display:flex;gap:13px;align-items:center;padding:11px 8px;border-bottom:1px solid var(--line);cursor:pointer;
+    transition:background .15s}
   .ep:hover{background:var(--panel2)}
   .ep .no{font-size:16px;color:var(--muted);width:30px;text-align:center;flex:none}
   .ep .ethumb{width:118px;aspect-ratio:16/9;object-fit:cover;border-radius:6px;flex:none;background:var(--panel2)}
@@ -231,11 +234,12 @@
   .ep .epplay{flex:none;width:34px;height:34px;border-radius:50%;border:1px solid rgba(255,255,255,.35);
     background:transparent;color:#fff;font-size:12px;cursor:pointer}
   .ep .epplay:hover{border-color:#fff}
-  .cast{display:flex;gap:16px;overflow-x:auto;padding-bottom:8px;scrollbar-width:none}
+  .cast{display:flex;gap:16px;overflow-x:auto;padding-bottom:8px;scrollbar-width:none;scroll-behavior:smooth}
   .cast::-webkit-scrollbar{display:none}
   .person{flex:none;width:104px}
   .person .pimg{position:relative;width:100%;aspect-ratio:2/3;border-radius:9px;overflow:hidden;
-    background:var(--panel2);border:1px solid var(--line)}
+    background:var(--panel2);border:1px solid var(--line);transition:transform .18s,box-shadow .18s}
+  .person:hover .pimg{transform:scale(1.04);box-shadow:0 10px 24px rgba(0,0,0,.5)}
   .person .pimg span{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
     font-size:30px;font-weight:700;color:#cfd2d6}
   .person .pimg img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;display:block}
@@ -245,8 +249,14 @@
   /* ---------- overlays (settings etc.) ---------- */
   .overlay{position:fixed;inset:0;z-index:80;background:rgba(5,5,7,.72);
     backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px);
-    display:none;align-items:flex-start;justify-content:center;overflow-y:auto;padding:34px 14px}
-  .overlay.open{display:flex}
+    display:flex;align-items:flex-start;justify-content:center;overflow-y:auto;padding:34px 14px;
+    opacity:0;visibility:hidden;pointer-events:none;
+    transition:opacity .2s ease-out,visibility 0s linear .22s}
+  .overlay.open{opacity:1;visibility:visible;pointer-events:auto;
+    transition:opacity .22s ease-out,visibility 0s}
+  .overlay .sheet{transform:translateY(16px);opacity:0;
+    transition:transform .24s ease-out,opacity .2s ease-out}
+  .overlay.open .sheet{transform:translateY(0);opacity:1}
   .sheet{background:var(--panel);border:1px solid var(--line);border-radius:16px;
     width:100%;max-width:880px;overflow:hidden;box-shadow:0 30px 80px rgba(0,0,0,.6)}
   .sheet.wide{max-width:960px}
@@ -267,8 +277,11 @@
   .delpaths div{padding:2px 0}
 
   /* ---------- player ---------- */
-  .player{position:fixed;inset:0;z-index:130;background:#000;display:none;flex-direction:column}
-  .player.open{display:flex}
+  .player{position:fixed;inset:0;z-index:130;background:#000;display:flex;flex-direction:column;
+    opacity:0;visibility:hidden;pointer-events:none;
+    transition:opacity .22s ease-out,visibility 0s linear .24s}
+  .player.open{opacity:1;visibility:visible;pointer-events:auto;
+    transition:opacity .24s ease-out,visibility 0s}
   .player .phead{display:flex;align-items:center;gap:14px;padding:12px 18px;color:var(--text)}
   .player .phead .t{font-size:16px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .player .phead .x{margin-left:auto;flex:none}
@@ -326,6 +339,26 @@
     padding:11px 20px;font-size:14px;opacity:0;pointer-events:none;transition:.25s;z-index:150;max-width:88vw}
   #toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
 
+  /* ---------- motion (view entrances, image fade, menus) ---------- */
+  @keyframes ykViewIn{from{opacity:0;transform:translateY(7px)}to{opacity:1;transform:translateY(0)}}
+  @keyframes ykDetailIn{from{opacity:0;transform:translateX(44px)}to{opacity:1;transform:translateX(0)}}
+  @keyframes ykDetailOut{from{opacity:1;transform:translateX(0)}to{opacity:0;transform:translateX(44px)}}
+  @keyframes ykMenuIn{from{opacity:0;transform:translateY(-3px)}to{opacity:1;transform:translateY(0)}}
+  .view-in{animation:ykViewIn .22s ease-out}
+  #view-detail.view-in{animation:ykDetailIn .27s ease-out}
+  #view-detail.view-out{animation:ykDetailOut .16s ease-in forwards}
+  .ctxmenu{animation:ykMenuIn .13s ease-out}
+  img.fimg{opacity:0;transition:opacity .38s ease-out}
+  img.fimg.ld{opacity:1}
+  .lmain img.lbg.fimg{opacity:0}
+  .lmain img.lbg.fimg.ld{opacity:.5}
+  @media (prefers-reduced-motion: reduce){
+    *,*::before,*::after{animation-duration:.01ms !important;animation-iteration-count:1 !important;
+      transition-duration:.01ms !important;scroll-behavior:auto !important}
+    img.fimg{opacity:1}
+    .lmain img.lbg.fimg{opacity:.5}
+  }
+
   @media (max-width:680px){
     header{padding:0 10px;grid-template-columns:auto 1fr auto}
     .logo{font-size:18px}
@@ -347,9 +380,50 @@
     .scard{width:104px}
     .person{width:86px}
   }
+  /* ---------- auth screen (login / first-run bootstrap) ---------- */
+  #authScreen{position:fixed;inset:0;z-index:300;background:var(--bg);
+    display:flex;align-items:center;justify-content:center;padding:20px}
+  .authcard{width:100%;max-width:360px;background:var(--panel);border:1px solid var(--line);
+    border-radius:16px;padding:28px 26px}
+  .authcard h2{margin:0 0 6px;font-size:20px}
+  .authcard label{display:block;font-size:13px;color:var(--muted);margin:12px 0 6px}
+  .authcard input{width:100%;background:var(--panel2);border:1px solid var(--line);color:var(--text);
+    border-radius:8px;padding:10px 12px;font-size:14px;outline:none}
+  .authlogo{font-size:22px;font-weight:800;letter-spacing:.14em;margin-bottom:16px;color:#fff}
+  .authlogo b{color:var(--green);font-weight:800}
+  .autherr{color:#ff6b6b;font-size:13px;min-height:18px;margin:10px 0 2px}
+  .btn.big{width:100%;padding:11px;font-size:15px;margin-top:10px}
+  .uadmin-badge{color:var(--green);border:1px solid var(--green);border-radius:999px;
+    font-size:11px;padding:1px 8px}
 </style>
 </head>
 <body>
+<!-- login / first-run bootstrap screen -->
+<div id="authScreen" style="display:none">
+  <div class="authcard">
+    <div class="authlogo"><b>▶</b> 影库</div>
+    <form id="bootstrapForm" style="display:none">
+      <h2>创建管理员</h2>
+      <div class="hint">首次使用，先创建管理员账号。以前的观看进度与收藏会归到这个账号名下。</div>
+      <label>用户名</label>
+      <input type="text" id="bootName" autocomplete="username">
+      <label>密码</label>
+      <input type="password" id="bootPw" autocomplete="new-password">
+      <div class="autherr" id="bootErr"></div>
+      <button type="submit" class="btn red big">创建并登录</button>
+    </form>
+    <form id="loginForm" style="display:none">
+      <h2>登录</h2>
+      <label>用户名</label>
+      <input type="text" id="loginName" autocomplete="username">
+      <label>密码</label>
+      <input type="password" id="loginPw" autocomplete="current-password">
+      <div class="autherr" id="loginErr"></div>
+      <button type="submit" class="btn red big">登录</button>
+    </form>
+  </div>
+</div>
+
 <header id="topbar">
   <div class="bar-left">
     <button class="iconbtn" id="burger" title="菜单">☰</button>
@@ -362,7 +436,6 @@
   <div class="bar-right">
     <label class="searchbox" id="searchBox"><span>⌕</span><input id="search" type="text" placeholder="搜索片名…" autocomplete="off"></label>
     <button class="iconbtn" id="searchBtn" title="搜索">⌕</button>
-    <button class="iconbtn" id="gear" title="设置">⚙</button>
   </div>
 </header>
 
@@ -375,7 +448,7 @@
 <main>
   <section id="view-home" class="pad">
     <div id="homeSecs"></div>
-    <div class="empty" id="homeEmpty" style="display:none">媒体库还是空的。点右上角 ⚙ 新建媒体库并扫描，或先在设置里触发全库扫描。</div>
+    <div class="empty" id="homeEmpty" style="display:none">媒体库还是空的。从左上角 ☰ 菜单打开「设置」，新建媒体库并扫描，或先在设置里触发全库扫描。</div>
   </section>
 
   <section id="view-fav" class="pad" style="display:none">
@@ -469,6 +542,34 @@
         要求密钥鉴权
       </label>
       <div class="hint">开启后，所有 API 请求必须带密钥（api_key 参数或 X-Emby-Token 头），网页端会自动附带。当前浏览器会记住密钥；其他浏览器首次打开时，在地址后加 ?api_key=密钥 访问一次即可记住。开启前请先复制保存好密钥，丢失密钥将无法通过网页管理（需在数据库中清除 api_auth_required 恢复）。</div>
+
+      <div id="userAdminSection" style="display:none">
+        <h3>用户管理</h3>
+        <div id="userList"></div>
+        <form id="newUserForm" style="margin-top:12px">
+          <div class="pathrow">
+            <input type="text" id="nuName" placeholder="用户名" autocomplete="off"
+              style="flex:1;background:var(--panel);border:1px solid var(--line);color:var(--text);border-radius:8px;padding:9px 12px;font-size:14px;outline:none">
+            <input type="password" id="nuPw" placeholder="密码" autocomplete="new-password"
+              style="flex:1;background:var(--panel);border:1px solid var(--line);color:var(--text);border-radius:8px;padding:9px 12px;font-size:14px;outline:none">
+          </div>
+          <div style="display:flex;align-items:center;gap:12px;margin-top:10px">
+            <label style="display:flex;align-items:center;gap:6px;font-size:13px;color:var(--muted);cursor:pointer">
+              <input type="checkbox" id="nuAdmin" style="width:15px;height:15px"> 管理员
+            </label>
+            <button type="submit" class="btn small">＋ 新建用户</button>
+          </div>
+        </form>
+      </div>
+
+      <h3>我的账号</h3>
+      <div class="hint" id="meLine" style="margin-bottom:10px">—</div>
+      <div class="pathrow">
+        <input type="password" id="myPw" placeholder="新密码" autocomplete="new-password"
+          style="flex:1;background:var(--panel);border:1px solid var(--line);color:var(--text);border-radius:8px;padding:9px 12px;font-size:14px;outline:none">
+        <button type="button" class="btn small" id="myPwSave">修改我的密码</button>
+        <button type="button" class="btn small" id="logoutBtn">退出登录</button>
+      </div>
     </div>
   </div>
 </div>
@@ -552,9 +653,25 @@ function setAPIKey(k) {
     else localStorage.removeItem("yk_api_key");
   } catch (e) {}
 }
+/* Login token (batch 12): issued per user at login; when present it —
+   not the server API key — is the credential every request carries,
+   so watch state lands on the signed-in account. The server key stays
+   as the pre-account fallback (and the ?api_key= recovery path). */
+let AUTH_TOKEN = "";
+try { AUTH_TOKEN = localStorage.getItem("yk_token") || ""; } catch (e) {}
+let ME = null; // {id, name, isAdmin, serverKey?} once /api/auth/me answers
+function setAuthToken(k) {
+  AUTH_TOKEN = k || "";
+  try {
+    if (AUTH_TOKEN) localStorage.setItem("yk_token", AUTH_TOKEN);
+    else localStorage.removeItem("yk_token");
+  } catch (e) {}
+}
+function credValue() { return AUTH_TOKEN || API_KEY; }
 function kurl(path) {
-  if (!API_KEY || typeof path !== "string" || !path.startsWith("/api/")) return path;
-  return path + (path.includes("?") ? "&" : "?") + "api_key=" + encodeURIComponent(API_KEY);
+  const c = credValue();
+  if (!c || typeof path !== "string" || !path.startsWith("/api/")) return path;
+  return path + (path.includes("?") ? "&" : "?") + "api_key=" + encodeURIComponent(c);
 }
 const api = async (path, opts) => {
   const r = await fetch(kurl(path), opts || {});
@@ -602,6 +719,25 @@ function gradFor(name) {
   return "linear-gradient(155deg,hsl(" + hue + ",42%,30%),hsl(" + ((hue + 50) % 360) + ",48%,13%))";
 }
 
+/* Image fade-in: <img class="fimg"> starts transparent (CSS); once its
+   data is available — the load event, or already complete from cache —
+   it gets .ld and fades in. The markup onerror handlers are untouched:
+   a failed image is still removed, and a fallback-chain image that
+   swaps src still fades in when the replacement loads. */
+function armFadeImg(img) {
+  if (img.classList.contains("ld")) return;
+  if (img.complete && img.naturalWidth > 0) { img.classList.add("ld"); return; }
+  img.addEventListener("load", () => img.classList.add("ld"), { once: true });
+}
+const fadeObserver = new MutationObserver(muts => {
+  muts.forEach(m => m.addedNodes.forEach(n => {
+    if (n.nodeType !== 1) return;
+    if (n.tagName === "IMG" && n.classList.contains("fimg")) armFadeImg(n);
+    if (n.querySelectorAll) n.querySelectorAll("img.fimg").forEach(armFadeImg);
+  }));
+});
+fadeObserver.observe(document.body, { childList: true, subtree: true });
+
 /* ---------------- cards ---------------- */
 function makeCard(it) {
   const d = document.createElement("div");
@@ -609,7 +745,7 @@ function makeCard(it) {
   let inner = '<div class="pwrap">';
   // Always ask the endpoint: HasPoster only reflects LOCAL art; items
   // without local posters get TMDB art lazily server-side.
-  inner += '<img loading="lazy" decoding="async" src="' + kurl("/api/items/" + it.Id + "/image/poster?w=320") + '" alt="" onerror="this.remove()">';
+  inner += '<img class="fimg" loading="lazy" decoding="async" src="' + kurl("/api/items/" + it.Id + "/image/poster?w=320") + '" alt="" onerror="this.remove()">';
   inner += '<div class="fb" style="background:' + gradFor(it.Name) + '">' + esc(it.Name) + "</div>";
   inner += '<div class="veil">' + (it.CommunityRating ? '<span class="r">★ ' + it.CommunityRating.toFixed(1) + "</span> · " : "") + esc(it.Name) + "</div></div>";
   inner += '<div class="nm">' + esc(it.Name) + '</div><div class="yr">' + (it.ProductionYear || "") + (it.Type === "Series" ? " · 剧集" : "") + "</div>";
@@ -626,7 +762,7 @@ function makeContinueCard(it) {
   let inner = '<div class="cwrap">';
   // Always ask the endpoint: episodes own no images (HasBackdrop is
   // false) but the server falls back to the episode still / series art.
-  inner += '<img loading="lazy" decoding="async" src="' + kurl("/api/items/" + it.Id + "/image/backdrop?w=640") + '" alt="" onerror="if(!this.dataset.f){this.dataset.f=1;this.src=\'' + kurl("/api/items/" + it.Id + "/image/poster?w=320") + '\'}else{this.remove()}">';
+  inner += '<img class="fimg" loading="lazy" decoding="async" src="' + kurl("/api/items/" + it.Id + "/image/backdrop?w=640") + '" alt="" onerror="if(!this.dataset.f){this.dataset.f=1;this.src=\'' + kurl("/api/items/" + it.Id + "/image/poster?w=320") + '\'}else{this.remove()}">';
   inner += '<div class="fb" style="background:' + gradFor(it.SeriesName || it.Name) + '">' + esc(it.SeriesName || it.Name) + "</div>";
   if (pct > 0) inner += '<div class="pbar"><i style="width:' + pct + '%"></i></div>';
   inner += "</div>";
@@ -653,14 +789,14 @@ function makeLibCard(lib) {
   const thumbs = lib.Thumbs || [];
   let inner = '<div class="lmain">';
   if (thumbs.length) {
-    inner += '<img class="lbg" loading="lazy" decoding="async" src="' + kurl("/api/items/" + thumbs[0] + "/image/backdrop?w=640") + '" alt="" onerror="if(!this.dataset.f){this.dataset.f=1;this.src=\'' + kurl("/api/items/" + thumbs[0] + "/image/poster?w=640") + '\'}else{this.remove()}">';
+    inner += '<img class="lbg fimg" loading="lazy" decoding="async" src="' + kurl("/api/items/" + thumbs[0] + "/image/backdrop?w=640") + '" alt="" onerror="if(!this.dataset.f){this.dataset.f=1;this.src=\'' + kurl("/api/items/" + thumbs[0] + "/image/poster?w=640") + '\'}else{this.remove()}">';
   }
   inner += '<div class="lshade" style="' + (thumbs.length ? "" : "background:" + gradFor(lib.Name)) + '"></div>';
   inner += '<div class="linfo"><div class="lname">' + esc(lib.Name) + '</div>' +
     '<div class="lkind">' + (KIND_EN[lib.Kind] || "MIXED") + "</div></div>";
   if (thumbs.length) {
     inner += '<div class="lstack">' + thumbs.slice(0, 3).map(id =>
-      '<img loading="lazy" decoding="async" src="' + kurl("/api/items/" + id + "/image/backdrop?w=240") + '" alt="" onerror="if(!this.dataset.f){this.dataset.f=1;this.src=\'' + kurl("/api/items/" + id + "/image/poster?w=240") + '\'}else{this.remove()}">').join("") + "</div>";
+      '<img class="fimg" loading="lazy" decoding="async" src="' + kurl("/api/items/" + id + "/image/backdrop?w=240") + '" alt="" onerror="if(!this.dataset.f){this.dataset.f=1;this.src=\'' + kurl("/api/items/" + id + "/image/poster?w=240") + '\'}else{this.remove()}">').join("") + "</div>";
   }
   inner += "</div>";
   inner += '<div class="lcap">' + esc(lib.Name) + "</div>";
@@ -675,12 +811,21 @@ let currentView = "home";   // home | fav | grid | detail
 let drawerActive = "home";  // home | fav | lib:<id>
 function showView(name) {
   currentView = name;
-  $("#view-home").style.display = name === "home" ? "" : "none";
-  $("#view-fav").style.display = name === "fav" ? "" : "none";
-  $("#view-grid").style.display = name === "grid" ? "" : "none";
-  $("#view-detail").style.display = name === "detail" ? "" : "none";
+  const secs = { home: $("#view-home"), fav: $("#view-fav"), grid: $("#view-grid"), detail: $("#view-detail") };
+  secs.home.style.display = name === "home" ? "" : "none";
+  secs.fav.style.display = name === "fav" ? "" : "none";
+  secs.grid.style.display = name === "grid" ? "" : "none";
+  secs.detail.style.display = name === "detail" ? "" : "none";
   $("#tabHome").classList.toggle("on", name === "home" || name === "grid");
   $("#tabFav").classList.toggle("on", name === "fav");
+  // Entrance motion: restart the CSS animation on the incoming view
+  // (detail gets its own slide-in variant via #view-detail.view-in).
+  const sec = secs[name];
+  if (sec) {
+    sec.classList.remove("view-in");
+    void sec.offsetWidth;
+    sec.classList.add("view-in");
+  }
   closeDrawer();
 }
 function renderDrawer() {
@@ -860,7 +1005,7 @@ async function doSearch(q) {
 }
 
 /* ---------------- detail page (Emby-style) ---------------- */
-const detailState = { id: null, data: null, returnView: "home", returnScroll: 0, pushed: false, openSeasonId: null };
+const detailState = { id: null, data: null, returnView: "home", returnScroll: 0, pushed: false, openSeasonId: null, closing: false, closeTimer: null };
 function srcSummary(d) {
   const ms = (d.MediaSources || [])[0];
   if (!ms) return "";
@@ -898,6 +1043,10 @@ async function openDetail(id, opts) {
       detailState.openSeasonId = targetEp && targetEp.ParentId ? targetEp.ParentId
         : ((d.Seasons && d.Seasons[0]) ? d.Seasons[0].Id : null);
     }
+    // Cancel a pending exit animation if a new detail opens in time.
+    if (detailState.closeTimer) { clearTimeout(detailState.closeTimer); detailState.closeTimer = null; }
+    detailState.closing = false;
+    $("#view-detail").classList.remove("view-out");
     detailState.id = id;
     detailState.data = d;
     renderDetail(d, { targetId: targetId, posTicks: posTicks, targetEp: targetEp, played: played });
@@ -912,6 +1061,23 @@ async function openDetail(id, opts) {
   }
 }
 function closeDetailUI() {
+  // Slide the detail page out first, then swap views (Emby-style exit).
+  const sec = $("#view-detail");
+  if (currentView === "detail" && !detailState.closing && sec.style.display !== "none") {
+    detailState.closing = true;
+    sec.classList.add("view-out");
+    detailState.closeTimer = setTimeout(() => {
+      detailState.closeTimer = null;
+      if (!detailState.closing) return; // a new detail opened meanwhile
+      detailState.closing = false;
+      sec.classList.remove("view-out");
+      finishCloseDetail();
+    }, 165);
+    return;
+  }
+  finishCloseDetail();
+}
+function finishCloseDetail() {
   detailState.pushed = false;
   detailState.id = null;
   detailState.data = null;
@@ -935,13 +1101,13 @@ window.addEventListener("popstate", () => {
 function renderDetail(d, ctx) {
   const page = $("#detailPage");
   let h = "";
-  h += '<div class="dback"><img decoding="async" src="' + kurl("/api/items/" + d.Id + "/image/backdrop-hi") + '" alt="" onerror="this.remove()"><div class="dshade"></div></div>';
+  h += '<div class="dback"><img class="fimg" decoding="async" src="' + kurl("/api/items/" + d.Id + "/image/backdrop-hi") + '" alt="" onerror="this.remove()"><div class="dshade"></div></div>';
   h += '<div class="dwrap">';
   h += '<div class="dtop"><button class="roundbtn" id="dBack" title="返回">‹</button>' +
        '<button class="roundbtn" id="dHomeBtn" title="首页">⌂</button></div>';
   h += '<div class="dmain">';
   h += '<div class="dposter"><div class="pwrap2">';
-  h += '<img decoding="async" src="' + kurl("/api/items/" + d.Id + "/image/poster?w=342") + '" alt="" onerror="this.remove()">';
+  h += '<img class="fimg" decoding="async" src="' + kurl("/api/items/" + d.Id + "/image/poster?w=342") + '" alt="" onerror="this.remove()">';
   h += '<div class="fb" style="background:' + gradFor(d.Name) + '">' + esc(d.Name) + "</div></div></div>";
   h += '<div class="dinfo"><h1>' + esc(d.Name) + "</h1>";
   if (d.OriginalTitle) h += '<div class="orig">' + esc(d.OriginalTitle) + "</div>";
@@ -1003,7 +1169,7 @@ function renderDetail(d, ctx) {
     h += '<div class="dsec">播出季</div><div class="seasonrail">';
     d.Seasons.forEach(sn => {
       h += '<div class="scard" data-season="' + sn.Id + '"><div class="swrap">';
-      h += '<img loading="lazy" decoding="async" src="' + kurl("/api/items/" + d.Id + "/image/poster?w=240") + '" alt="" onerror="this.remove()">';
+      h += '<img class="fimg" loading="lazy" decoding="async" src="' + kurl("/api/items/" + d.Id + "/image/poster?w=240") + '" alt="" onerror="this.remove()">';
       h += '<div class="fb" style="background:' + gradFor(d.Name) + '">' + esc(sn.Name) + "</div>";
       h += '<span class="cntbadge">' + (sn.Episodes || []).length + " 集</span></div>";
       h += '<div class="snm">' + esc(sn.Name) + "</div></div>";
@@ -1015,7 +1181,7 @@ function renderDetail(d, ctx) {
     h += '<div class="dsec">演职人员</div><div class="cast">';
     d.People.forEach(p => {
       h += '<div class="person"><div class="pimg"><span>' + esc((p.Name || "?").slice(0, 1)) + "</span>" +
-        (p.ImageUrl ? '<img loading="lazy" decoding="async" src="' + esc(p.ImageUrl) + '" alt="" onerror="this.remove()">' : "") +
+        (p.ImageUrl ? '<img class="fimg" loading="lazy" decoding="async" src="' + esc(p.ImageUrl) + '" alt="" onerror="this.remove()">' : "") +
         '</div><div class="pn">' + esc(p.Name) + "</div>" +
         (p.Role ? '<div class="pr">' + esc(p.Role) + "</div>" : "") + "</div>";
     });
@@ -1062,7 +1228,7 @@ function epRowHTML(ep) {
     ? Math.min(100, Math.max(1, Math.round(ud.PlaybackPositionTicks / ep.RunTimeTicks * 100))) : 0;
   const ss = srcSummary(ep);
   let h = '<div class="ep" data-ep="' + ep.Id + '"><div class="no">' + (ep.IndexNumber != null ? ep.IndexNumber : "") + '</div>' +
-    '<img class="ethumb" loading="lazy" decoding="async" src="' + kurl("/api/items/" + ep.Id + "/image/backdrop?w=320") + '" alt="" onerror="this.remove()"><div class="ti">';
+    '<img class="ethumb fimg" loading="lazy" decoding="async" src="' + kurl("/api/items/" + ep.Id + "/image/backdrop?w=320") + '" alt="" onerror="this.remove()"><div class="ti">';
   h += '<div class="t">' + esc(ep.Name) + (ud.Played ? '<span class="chk">✓</span>' : "") + "</div>";
   if (ep.Overview) h += '<div class="s">' + esc(ep.Overview) + "</div>";
   if (ss) h += '<div class="s">' + esc(ss) + "</div>";
@@ -1472,9 +1638,9 @@ async function openSettings() {
   refreshStatsLine();
   refreshTMDBSetting();
   refreshAPIKeySetting();
+  refreshUsers();
   try { $("#scanStat").textContent = fmtScanStatus(await api("/api/scan/status")); } catch (e) {}
 }
-$("#gear").addEventListener("click", openSettings);
 
 /* ---------------- settings: TMDB ---------------- */
 async function refreshTMDBSetting() {
@@ -1623,6 +1789,175 @@ $("#pickerOK").addEventListener("click", () => {
   closeOverlay("pickerOverlay");
 });
 
+/* ---------------- auth: session probe, login, bootstrap ---------------- */
+function showAuth(which) {
+  $("#authScreen").style.display = "flex";
+  $("#bootstrapForm").style.display = which === "bootstrap" ? "" : "none";
+  $("#loginForm").style.display = which === "login" ? "" : "none";
+  const first = $(which === "bootstrap" ? "#bootName" : "#loginName");
+  if (first) first.focus();
+}
+function hideAuth() { $("#authScreen").style.display = "none"; }
+function enterApp(me) {
+  ME = me;
+  hideAuth();
+  loadHome();
+}
+async function boot() {
+  let me = null;
+  try { me = await api("/api/auth/me"); } catch (e) { me = null; }
+  if (me && me.bootstrapNeeded) { showAuth("bootstrap"); return; }
+  if (!me || !me.id) { showAuth("login"); return; }
+  enterApp(me);
+}
+$("#loginForm").addEventListener("submit", async e => {
+  e.preventDefault();
+  $("#loginErr").textContent = "";
+  try {
+    const out = await api("/api/auth/login", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ username: $("#loginName").value.trim(), password: $("#loginPw").value })
+    });
+    setAuthToken(out.accessToken);
+    $("#loginPw").value = "";
+    enterApp({ id: out.user.id, name: out.user.name, isAdmin: out.user.isAdmin });
+  } catch (err) {
+    $("#loginErr").textContent = "登录失败：用户名或密码不正确";
+  }
+});
+$("#bootstrapForm").addEventListener("submit", async e => {
+  e.preventDefault();
+  $("#bootErr").textContent = "";
+  try {
+    const out = await api("/api/users/bootstrap", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: $("#bootName").value.trim(), password: $("#bootPw").value })
+    });
+    setAuthToken(out.accessToken);
+    $("#bootPw").value = "";
+    toast("管理员已创建");
+    enterApp({ id: out.user.id, name: out.user.name, isAdmin: out.user.isAdmin });
+  } catch (err) {
+    $("#bootErr").textContent = "创建失败：" + err.message;
+  }
+});
+$("#logoutBtn").addEventListener("click", async () => {
+  try { await api("/api/auth/logout", { method: "POST" }); } catch (e) {}
+  setAuthToken("");
+  setAPIKey("");
+  ME = null;
+  location.reload();
+});
+$("#myPwSave").addEventListener("click", async () => {
+  const pw = $("#myPw").value;
+  if (!pw) { toast("先输入新密码"); return; }
+  if (!ME || !ME.id) { toast("当前会话没有可改密的账号"); return; }
+  try {
+    const out = await api("/api/users/" + ME.id + "/password", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ password: pw })
+    });
+    if (out.accessToken) setAuthToken(out.accessToken);
+    $("#myPw").value = "";
+    toast("密码已修改");
+  } catch (e) {
+    toast("修改密码失败：" + e.message);
+  }
+});
+
+/* ---------------- settings: user management (admins only) ---------------- */
+async function refreshUsers() {
+  const isAdmin = !!(ME && (ME.isAdmin || ME.serverKey));
+  $("#userAdminSection").style.display = isAdmin ? "" : "none";
+  $("#meLine").textContent = ME
+    ? "当前登录：" + ME.name + (ME.isAdmin ? "（管理员）" : "") + (ME.serverKey ? "（服务端密钥会话）" : "")
+    : "—";
+  if (!isAdmin) return;
+  try {
+    const out = await api("/api/users");
+    const box = $("#userList");
+    box.innerHTML = "";
+    if (!out.users.length) {
+      box.innerHTML = '<div class="hint" style="padding:8px 6px">暂无用户。</div>';
+      return;
+    }
+    out.users.forEach(u => box.appendChild(userRow(u)));
+  } catch (e) {
+    toast("读取用户列表失败：" + e.message);
+  }
+}
+function userRow(u) {
+  const row = document.createElement("div");
+  row.className = "librow";
+  row.innerHTML = '<span class="nm">' + esc(u.name) + "</span>" +
+    (u.isAdmin ? '<span class="uadmin-badge">管理员</span>' : "") +
+    (ME && u.id === ME.id ? '<span class="inf">（我）</span>' : "");
+  const ops = document.createElement("div");
+  ops.className = "ops";
+  const pwBox = document.createElement("div");
+  pwBox.style.display = "none";
+  pwBox.style.width = "100%";
+  pwBox.style.marginTop = "8px";
+  const pwInput = document.createElement("input");
+  pwInput.type = "password";
+  pwInput.placeholder = "新密码";
+  pwInput.autocomplete = "new-password";
+  pwInput.style.cssText = "background:var(--panel);border:1px solid var(--line);color:var(--text);border-radius:8px;padding:8px 10px;font-size:13px;outline:none;margin-right:8px";
+  const pwSave = document.createElement("button");
+  pwSave.className = "btn small";
+  pwSave.textContent = "保存新密码";
+  pwSave.addEventListener("click", async () => {
+    if (!pwInput.value) { toast("先输入新密码"); return; }
+    try {
+      const out = await api("/api/users/" + u.id + "/password", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ password: pwInput.value })
+      });
+      if (out.accessToken) setAuthToken(out.accessToken);
+      pwInput.value = "";
+      pwBox.style.display = "none";
+      toast("已重置「" + u.name + "」的密码");
+    } catch (e) { toast("重置失败：" + e.message); }
+  });
+  pwBox.appendChild(pwInput); pwBox.appendChild(pwSave);
+  const bPw = document.createElement("button");
+  bPw.className = "btn small"; bPw.textContent = "重置密码";
+  bPw.addEventListener("click", () => {
+    pwBox.style.display = pwBox.style.display === "none" ? "" : "none";
+  });
+  const bDel = document.createElement("button");
+  bDel.className = "btn small danger"; bDel.textContent = "删除";
+  bDel.addEventListener("click", async () => {
+    if (!await askConfirm("删除用户「" + u.name + "」？其观看记录会保留在库中但不再归属任何账号。")) return;
+    try {
+      await api("/api/users/" + u.id, { method: "DELETE" });
+      toast("已删除「" + u.name + "」");
+      refreshUsers();
+    } catch (e) { toast("删除失败：" + e.message); }
+  });
+  ops.appendChild(bPw); ops.appendChild(bDel);
+  row.appendChild(ops);
+  row.appendChild(pwBox);
+  return row;
+}
+$("#newUserForm").addEventListener("submit", async e => {
+  e.preventDefault();
+  const name = $("#nuName").value.trim();
+  const pw = $("#nuPw").value;
+  if (!name || !pw) { toast("用户名和密码都要填"); return; }
+  try {
+    await api("/api/users", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: name, password: pw, isAdmin: $("#nuAdmin").checked })
+    });
+    $("#nuName").value = ""; $("#nuPw").value = ""; $("#nuAdmin").checked = false;
+    toast("用户「" + name + "」已创建");
+    refreshUsers();
+  } catch (err) {
+    toast("创建用户失败：" + err.message);
+  }
+});
+
 /* ---------------- wiring ---------------- */
 $("#gridSort").addEventListener("change", () => {
   grid.cursor = "";
@@ -1649,7 +1984,7 @@ window.addEventListener("scroll", () => {
   $("#topbar").classList.toggle("scrolled", window.scrollY > 30);
 }, { passive: true });
 
-loadHome();
+boot();
 </script>
 </body>
 </html>

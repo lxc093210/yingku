@@ -97,9 +97,10 @@ func (s *Server) hasArtwork(it *store.Item, kind string) bool {
 	return false
 }
 
-// embyDTOs converts items, batch-loading child counts, user data and
-// series names so a full page costs a constant number of queries.
-func (s *Server) embyDTOs(items []*store.Item) ([]embyItemDTO, error) {
+// embyDTOs converts items, batch-loading child counts, the given
+// user's data and series names so a full page costs a constant number
+// of queries.
+func (s *Server) embyDTOs(userID string, items []*store.Item) ([]embyItemDTO, error) {
 	out := make([]embyItemDTO, 0, len(items))
 	if len(items) == 0 {
 		return out, nil
@@ -116,7 +117,7 @@ func (s *Server) embyDTOs(items []*store.Item) ([]embyItemDTO, error) {
 	if err != nil {
 		return nil, err
 	}
-	uds, err := s.st.UserDataBatch(defaultUserID, ids)
+	uds, err := s.st.UserDataBatch(userID, ids)
 	if err != nil {
 		return nil, err
 	}
@@ -344,8 +345,14 @@ func (s *Server) handleEmbyItems(w http.ResponseWriter, r *http.Request) {
 	}
 	filter.Search = queryParam(q, "SearchTerm", "searchTerm")
 	if sb := queryParam(q, "SortBy", "sortBy"); sb != "" {
-		if first := strings.TrimSpace(strings.Split(sb, ",")[0]); strings.EqualFold(first, "DateCreated") {
-			filter.SortField = "date"
+		// Clients send a variety of date-ish sort keys; all of them map
+		// onto the one date the store tracks (date_added). Anything
+		// else falls through to the default name sort — never an error.
+		first := strings.TrimSpace(strings.Split(sb, ",")[0])
+		for _, k := range []string{"DateCreated", "DateLastContentAdded", "PremiereDate"} {
+			if strings.EqualFold(first, k) {
+				filter.SortField = "date"
+			}
 		}
 	}
 	filter.Desc = strings.EqualFold(queryParam(q, "SortOrder", "sortOrder"), "Descending")
@@ -355,7 +362,7 @@ func (s *Server) handleEmbyItems(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	dtos, err := s.embyDTOs(items)
+	dtos, err := s.embyDTOs(s.currentUserID(r), items)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
@@ -391,7 +398,7 @@ func (s *Server) handleEmbyItem(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusNotFound, "item not found")
 		return
 	}
-	dtos, err := s.embyDTOs([]*store.Item{it})
+	dtos, err := s.embyDTOs(s.currentUserID(r), []*store.Item{it})
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
@@ -674,7 +681,7 @@ func (s *Server) handleSessionReport(w http.ResponseWriter, r *http.Request) {
 			if rt := int64(it.RuntimeMin) * 60 * 10_000_000; rt > 0 && ticks*10 >= rt*9 {
 				played = true
 			}
-			_ = s.st.UpsertProgress(id, defaultUserID, ticks, played, time.Now().Unix())
+			_ = s.st.UpsertProgress(id, s.currentUserID(r), ticks, played, time.Now().Unix())
 		}
 	}
 	w.WriteHeader(http.StatusNoContent)
@@ -687,9 +694,11 @@ type authenticateByNameRequest struct {
 	Pw       string `json:"Pw"`
 }
 
-// embyUserDTO is the single synthetic user of this single-user server.
-// Any requested user id resolves to it (same convention as
-// Users/{userId}/Items), which is what Nan's helper probes for.
+// embyUserDTO is the synthetic fallback user, served when the
+// requested id names no real account (and for the user list while no
+// accounts exist at all). Nan's helper probes arbitrary user ids when
+// registering a server, so the probe keeps working exactly as it did
+// before real accounts landed (batch 10 behavior).
 func (s *Server) embyUserDTO() map[string]any {
 	return map[string]any{
 		"Id":                    s.ensureServerID(),
@@ -701,45 +710,70 @@ func (s *Server) embyUserDTO() map[string]any {
 	}
 }
 
+// embyUserDTOFor renders a real account as an Emby user DTO.
+func embyUserDTOFor(u *store.User) map[string]any {
+	return map[string]any{
+		"Id":                    u.ID,
+		"Name":                  u.Name,
+		"HasPassword":           true,
+		"HasConfiguredPassword": true,
+		"Configuration":         map[string]any{},
+		"Policy":                map[string]any{"IsAdministrator": u.IsAdmin, "EnableAllFolders": true},
+	}
+}
+
 func (s *Server) handleEmbyUser(w http.ResponseWriter, r *http.Request) {
+	if u, err := s.st.GetUserByID(r.PathValue("userId")); err == nil && u != nil {
+		writeJSON(w, http.StatusOK, embyUserDTOFor(u))
+		return
+	}
 	writeJSON(w, http.StatusOK, s.embyUserDTO())
 }
 
 func (s *Server) handleEmbyUsers(w http.ResponseWriter, r *http.Request) {
+	users, err := s.st.ListUsers()
+	if err == nil && len(users) > 0 {
+		out := make([]any, 0, len(users))
+		for _, u := range users {
+			out = append(out, embyUserDTOFor(u))
+		}
+		writeJSON(w, http.StatusOK, out)
+		return
+	}
 	writeJSON(w, http.StatusOK, []any{s.embyUserDTO()})
 }
 
-// handleAuthenticateByName answers Emby's by-name login. yingku has no
-// user accounts (single-user LAN server), so the password is not
-// checked; the caller gets the stable server-derived user id and the
-// current API key as its access token, which is what Nan and Emby
-// clients need to keep calling the API.
+// handleAuthenticateByName answers Emby's by-name login with real
+// credential checks (batch 12): the username must exist and the
+// password must verify, otherwise 401. On success the caller gets a
+// freshly issued per-user access token — the token Nan and Emby
+// clients present on later calls, which is also what pins their
+// progress reports to this account.
 func (s *Server) handleAuthenticateByName(w http.ResponseWriter, r *http.Request) {
 	var req authenticateByNameRequest
 	if r.Body != nil {
 		_ = json.NewDecoder(r.Body).Decode(&req)
 	}
-	name := strings.TrimSpace(req.Username)
-	if name == "" {
-		name = "yingku"
-	}
-	key, err := s.ensureAPIKey()
+	u, err := s.verifyLogin(req.Username, req.Pw)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	userID := s.ensureServerID()
+	if u == nil {
+		writeErr(w, http.StatusUnauthorized, "invalid username or password")
+		return
+	}
+	token, err := s.st.IssueToken(u.ID)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"User": map[string]any{
-			"Id":                    userID,
-			"Name":                  name,
-			"HasPassword":           false,
-			"HasConfiguredPassword": false,
-		},
-		"AccessToken": key,
+		"User":        embyUserDTOFor(u),
+		"AccessToken": token,
 		"SessionInfo": map[string]any{
 			"Id":     "yk-session",
-			"UserId": userID,
+			"UserId": u.ID,
 		},
 	})
 }
