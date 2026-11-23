@@ -12,6 +12,8 @@ import (
 	"path/filepath"
 	"strconv"
 	"sync"
+
+	"yingku/internal/store"
 )
 
 // ---- per-key mutual exclusion ----
@@ -83,19 +85,143 @@ func parseImageWidth(r *http.Request) int {
 
 // resolveImageFile finds the on-disk file to serve for an item image:
 // the scanner-registered local file first, then a previously cached
-// TMDB download, then — for movies/series with a TMDB id — a lazy TMDB
-// fetch cached under cache/tmdb-art. "" when nothing is available.
+// TMDB download, then a lazy TMDB fetch cached under cache/tmdb-art.
+// Episodes and seasons own no artwork in most libraries, so they fall
+// back along the series chain (see resolveEpisodeImage). "" when
+// nothing is available.
 func (s *Server) resolveImageFile(id int64, kind string) string {
-	if p, err := s.st.ImagePath(id, kind); err == nil && p != "" {
-		clean := filepath.Clean(p)
-		if allowed, aerr := s.pathWithinRoots(clean); aerr == nil && allowed && fileExists(clean) {
-			return clean
-		}
+	if p := s.localImageFile(id, kind); p != "" {
+		return p
 	}
 	if cache := s.tmdbArtFile(id, kind); fileExists(cache) {
 		return cache
 	}
-	return s.lazyTMDBArt(id, kind)
+	it, err := s.st.GetItem(id)
+	if err != nil || it == nil {
+		return ""
+	}
+	switch it.Type {
+	case "movie", "series":
+		return s.lazyTMDBArt(id, kind)
+	case "episode", "season":
+		return s.resolveEpisodeImage(it, kind)
+	}
+	return ""
+}
+
+// localImageFile returns the item's scanner-registered local image
+// file when it exists on disk and passes the library-roots guard.
+func (s *Server) localImageFile(id int64, kind string) string {
+	p, err := s.st.ImagePath(id, kind)
+	if err != nil || p == "" {
+		return ""
+	}
+	clean := filepath.Clean(p)
+	if allowed, aerr := s.pathWithinRoots(clean); aerr == nil && allowed && fileExists(clean) {
+		return clean
+	}
+	return ""
+}
+
+// resolveEpisodeImage is the fallback chain for episodes and seasons,
+// which rarely carry artwork of their own:
+//
+//   - an episode's backdrop first tries the episode's TMDB still
+//     (the still is a wide frame, so it is never used as a poster);
+//   - then the parent series answers with the same kind, resolved
+//     through the full chain (its local file, its TMDB cache, its own
+//     lazy TMDB fetch) — cached once under the series, shared by all
+//     of its episodes.
+func (s *Server) resolveEpisodeImage(it *store.Item, kind string) string {
+	if it.Type == "episode" && kind == "backdrop" {
+		if p := s.lazyEpisodeStill(it); p != "" {
+			return p
+		}
+	}
+	series := s.seriesItemOf(it)
+	if series == nil {
+		return ""
+	}
+	return s.resolveImageFile(series.ID, kind)
+}
+
+// seriesItemOf finds the series an episode or season belongs to: via
+// the stored series id when it really points at a series, otherwise by
+// walking the parent chain (episode → season → series). Nil when no
+// series can be determined.
+func (s *Server) seriesItemOf(it *store.Item) *store.Item {
+	if it.SeriesID != nil && *it.SeriesID != it.ID {
+		if cand, err := s.st.GetItem(*it.SeriesID); err == nil && cand != nil && cand.Type == "series" {
+			return cand
+		}
+	}
+	cur := it
+	for depth := 0; depth < 4 && cur.ParentID != nil; depth++ {
+		parent, err := s.st.GetItem(*cur.ParentID)
+		if err != nil || parent == nil {
+			return nil
+		}
+		if parent.Type == "series" {
+			if parent.ID != it.ID {
+				return parent
+			}
+			return nil
+		}
+		cur = parent
+	}
+	return nil
+}
+
+// lazyEpisodeStill downloads the episode's TMDB still (w780) into the
+// episode's own tmdb-art backdrop slot and returns its path. The still
+// is looked up on the parent series' TMDB entry by season/episode
+// number. Concurrent calls for the same episode collapse into one
+// fetch; any failure returns "" and caches nothing.
+func (s *Server) lazyEpisodeStill(ep *store.Item) string {
+	if ep.SeasonNum == nil || ep.EpisodeNum == nil {
+		return ""
+	}
+	series := s.seriesItemOf(ep)
+	if series == nil || series.TmdbID <= 0 {
+		return ""
+	}
+	cfg, err := s.tmdbCfg()
+	if err != nil || !cfg.available() {
+		return ""
+	}
+	unlock := s.imgLocks.lock(fmt.Sprintf("art-%d-backdrop", ep.ID))
+	defer unlock()
+	// Another goroutine may have fetched it while we waited.
+	if cache := s.tmdbArtFile(ep.ID, "backdrop"); fileExists(cache) {
+		return cache
+	}
+	still, err := fetchTMDBEpisodeStill(cfg, series.TmdbID, *ep.SeasonNum, *ep.EpisodeNum)
+	if err != nil || still == "" {
+		return ""
+	}
+	data, err := cfg.downloadSized(still, "w780")
+	if err != nil || len(data) == 0 {
+		return ""
+	}
+	return s.saveTMDBArt(ep.ID, "backdrop", data)
+}
+
+// saveTMDBArt stores downloaded TMDB artwork in the tmdb-art cache
+// (written via a temp file + rename so readers never see a partial
+// image) and returns the cache path, "" on failure.
+func (s *Server) saveTMDBArt(id int64, kind string, data []byte) string {
+	cache := s.tmdbArtFile(id, kind)
+	if err := os.MkdirAll(filepath.Dir(cache), 0o755); err != nil {
+		return ""
+	}
+	tmp := cache + ".tmp"
+	if err := os.WriteFile(tmp, data, 0o644); err != nil {
+		return ""
+	}
+	if err := os.Rename(tmp, cache); err != nil {
+		return ""
+	}
+	return cache
 }
 
 // lazyTMDBArt lazily downloads the requested artwork kind from TMDB
@@ -140,18 +266,7 @@ func (s *Server) lazyTMDBArt(id int64, kind string) string {
 	if err != nil || len(data) == 0 {
 		return ""
 	}
-	cache := s.tmdbArtFile(id, kind)
-	if err := os.MkdirAll(filepath.Dir(cache), 0o755); err != nil {
-		return ""
-	}
-	tmp := cache + ".tmp"
-	if err := os.WriteFile(tmp, data, 0o644); err != nil {
-		return ""
-	}
-	if err := os.Rename(tmp, cache); err != nil {
-		return ""
-	}
-	return cache
+	return s.saveTMDBArt(id, kind, data)
 }
 
 // serveItemImage serves one item poster/backdrop: the resolved source

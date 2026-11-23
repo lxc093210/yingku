@@ -170,6 +170,29 @@ func fetchTMDBArt(cfg tmdbConfig, kind string, tmdbID int) (poster, backdrop str
 	return poster, backdrop, nil
 }
 
+type tmdbEpisode struct {
+	StillPath string `json:"still_path"`
+}
+
+// fetchTMDBEpisodeStill returns the still file_path for one episode of
+// a series ("" when TMDB has no still for it). Any error is returned
+// for the caller to swallow silently.
+func fetchTMDBEpisodeStill(cfg tmdbConfig, tmdbID, seasonNum, episodeNum int) (string, error) {
+	resp, err := cfg.get(tmdbClient, fmt.Sprintf("/tv/%d/season/%d/episode/%d", tmdbID, seasonNum, episodeNum))
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("tmdb episode: status %d", resp.StatusCode)
+	}
+	var ep tmdbEpisode
+	if err := json.NewDecoder(resp.Body).Decode(&ep); err != nil {
+		return "", err
+	}
+	return ep.StillPath, nil
+}
+
 type tmdbDetails struct {
 	Overview       string  `json:"overview"`
 	VoteAverage    float64 `json:"vote_average"`
