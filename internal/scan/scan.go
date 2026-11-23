@@ -17,6 +17,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -40,10 +41,24 @@ type Status struct {
 	Error     string `json:"error,omitempty"`
 }
 
+// CurrentScanLogicVersion is bumped whenever scanning logic changes in a
+// way that must also reach items whose files did not change (batch 6:
+// strict per-episode subtitle matching). The version is tracked per
+// library: a library whose stored version lags is fully reprocessed on
+// its next scan — all fingerprint skips disabled — and its version is
+// written back when that scan completes.
+const CurrentScanLogicVersion = 1
+
+const scanLogicVersionKey = "scan_logic_version"
+
 // Scanner runs library scans, at most one at a time.
 type Scanner struct {
 	st        *store.Store
 	providers []meta.MediaInfoProvider
+
+	// forceFull is armed for the duration of a run whose stored
+	// scan-logic version lags CurrentScanLogicVersion.
+	forceFull bool
 
 	mu     sync.Mutex
 	status Status
@@ -157,6 +172,43 @@ func (s *Scanner) EnsureSeeded(root string) error {
 		}
 	}
 	return nil
+}
+
+// logicVersionKey is the app_settings key holding one library's
+// scan-logic version.
+func logicVersionKey(libID int64) string {
+	return scanLogicVersionKey + ":" + strconv.FormatInt(libID, 10)
+}
+
+// storedLogicVersion returns the library's persisted scan-logic version
+// (0 when the key is unset or unparsable, e.g. databases written before
+// the key existed).
+func (s *Scanner) storedLogicVersion(libID int64) int {
+	v, err := s.st.GetSetting(logicVersionKey(libID))
+	if err != nil {
+		return 0
+	}
+	n, err := strconv.Atoi(strings.TrimSpace(v))
+	if err != nil {
+		return 0
+	}
+	return n
+}
+
+// beginRun arms a forced full reprocess for the scan of one library when
+// its stored scan-logic version lags CurrentScanLogicVersion, and
+// reports whether it did.
+func (s *Scanner) beginRun(libID int64) bool {
+	s.forceFull = s.storedLogicVersion(libID) < CurrentScanLogicVersion
+	return s.forceFull
+}
+
+// unchanged reports whether the indexed item can be skipped: same
+// fingerprint, date_added already backfilled, and this run is not a
+// forced full reprocess. The date_added backfill and the logic-version
+// force are independent one-shot triggers; either one reprocesses.
+func (s *Scanner) unchanged(ex store.IndexEntry, fp string) bool {
+	return !s.forceFull && ex.Fingerprint == fp && ex.DateAdded > 0
 }
 
 // ScanAll synchronously scans every library's root paths, seeding from
@@ -279,8 +331,13 @@ type folderCtx struct {
 
 // scanLibrary scans all root paths of one library, then deletes its
 // vanished items. Item folders whose longest-prefix owner is a different
-// library are skipped (the owning library's scan handles them).
+// library are skipped (the owning library's scan handles them). When the
+// library's stored scan-logic version lags CurrentScanLogicVersion the
+// scan reprocesses every item (see beginRun) and writes the new version
+// back on success.
 func (s *Scanner) scanLibrary(lib store.Library, owners []rootOwner) error {
+	force := s.beginRun(lib.ID)
+	defer func() { s.forceFull = false }()
 	index, err := s.st.LoadIndex(lib.ID)
 	if err != nil {
 		return err
@@ -302,6 +359,11 @@ func (s *Scanner) scanLibrary(lib store.Library, owners []rootOwner) error {
 	}
 	if deleted > 0 {
 		s.bump(func(st *Status) { st.Deleted += deleted })
+	}
+	if force {
+		if err := s.st.SetSetting(logicVersionKey(lib.ID), strconv.Itoa(CurrentScanLogicVersion)); err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -601,8 +663,9 @@ func (s *Scanner) processMovieFolder(w *writer, index map[string]store.IndexEntr
 	sidecars := sidecarsOf(strms)
 	fp := fingerprint(strms, sidecars)
 	// A stored date_added of 0 marks a legacy row: reprocess once even
-	// when the fingerprint is unchanged so the backfill lands.
-	if ex, ok := index[ctx.itemDir]; ok && ex.Fingerprint == fp && ex.DateAdded > 0 {
+	// when the fingerprint is unchanged so the backfill lands (see
+	// unchanged for the combined skip rule).
+	if ex, ok := index[ctx.itemDir]; ok && s.unchanged(ex, fp) {
 		s.skip(seen, ctx.itemDir)
 		return nil
 	}
@@ -637,7 +700,7 @@ func (s *Scanner) processMovieFolder(w *writer, index map[string]store.IndexEntr
 	_, err := s.writeOne(w, index, seen, pendingItem{
 		item: it, sources: sources,
 		images: folderImages(ctx.files),
-		subs:   matchSubtitles(ctx.files, strms),
+		subs:   matchSubtitles(ctx.files, len(strms), strms),
 		people: actorsToPeople(nfo),
 	})
 	return err
@@ -668,7 +731,7 @@ func (s *Scanner) processSeriesFolder(w *writer, index map[string]store.IndexEnt
 	}
 	series.Fingerprint = fingerprint(fpFiles, nil)
 	var seriesID int64
-	if ex, ok := index[ctx.itemDir]; ok && ex.Fingerprint == series.Fingerprint && ex.DateAdded > 0 {
+	if ex, ok := index[ctx.itemDir]; ok && s.unchanged(ex, series.Fingerprint) {
 		s.skip(seen, ctx.itemDir)
 		seriesID = ex.ID
 	} else {
@@ -724,7 +787,7 @@ func (s *Scanner) processSeriesFolder(w *writer, index map[string]store.IndexEnt
 			}
 		}
 		st.Fingerprint = fingerprint(fpF, nil)
-		if ex, ok := index[path]; ok && ex.Fingerprint == st.Fingerprint && ex.DateAdded > 0 {
+		if ex, ok := index[path]; ok && s.unchanged(ex, st.Fingerprint) {
 			s.skip(seen, path)
 			seasonIDs[num] = ex.ID
 			seasonPaths[num] = path
@@ -784,7 +847,7 @@ func (s *Scanner) processSeriesFolder(w *writer, index map[string]store.IndexEnt
 
 func (s *Scanner) processEpisode(w *writer, index map[string]store.IndexEntry, seen map[string]struct{}, libID, seriesID, seasonID int64, seasonNum int, strm string, siblings []string, now int64) error {
 	fp := fingerprint([]string{strm}, sidecarsOf([]string{strm}))
-	if ex, ok := index[strm]; ok && ex.Fingerprint == fp && ex.DateAdded > 0 {
+	if ex, ok := index[strm]; ok && s.unchanged(ex, fp) {
 		s.skip(seen, strm)
 		return nil
 	}
@@ -832,7 +895,7 @@ func (s *Scanner) processEpisode(w *writer, index map[string]store.IndexEntry, s
 			Width: mi.Width, Height: mi.Height, VideoCodec: mi.VideoCodec,
 			HDR: mi.HDR, AudioSummary: mi.AudioSummary, MediaInfoSource: mi.Source,
 		}},
-		subs:   matchSubtitles(siblings, []string{strm}),
+		subs:   matchSubtitles(siblings, len(filterExt(siblings, ".strm")), []string{strm}),
 		people: actorsToPeople(epNFO),
 	})
 	return err
@@ -1085,40 +1148,62 @@ var subExts = map[string]bool{".srt": true, ".ass": true, ".ssa": true, ".vtt": 
 
 var langTokens = []string{"zh-cn", "zh-tw", "zh-hans", "zh-hant", "chs", "cht", "chi", "zho", "eng", "jpn", "kor"}
 
-// matchSubtitles assigns subtitle sidecars of a folder to the given strms.
-func matchSubtitles(folderFiles, strms []string) []store.Subtitle {
+// matchSubtitles assigns a folder's subtitle sidecars to the item(s)
+// backed by targets. folderStrmCount is the number of .strm files the
+// folder really holds: only when the target is the folder's sole strm
+// does every subtitle in the folder belong to it. Otherwise — episodes
+// sharing a season folder, multi-version movie folders — a subtitle
+// must strictly match a target: its file name starts with the target's
+// stem, or it carries the target's SxxExx season+episode token. (The
+// episode call site used to pass just its own strm, which made every
+// episode inherit the whole season's subtitles.)
+func matchSubtitles(folderFiles []string, folderStrmCount int, targets []string) []store.Subtitle {
 	var subs []string
 	for _, f := range folderFiles {
 		if subExts[strings.ToLower(filepath.Ext(f))] {
 			subs = append(subs, f)
 		}
 	}
-	if len(subs) == 0 || len(strms) == 0 {
+	if len(subs) == 0 || len(targets) == 0 {
 		return nil
 	}
-	// Single-strm folders: every subtitle belongs to that item.
-	if len(strms) == 1 {
+	// The folder's only strm: every subtitle belongs to that item.
+	if folderStrmCount == 1 && len(targets) == 1 {
 		out := make([]store.Subtitle, 0, len(subs))
 		for _, p := range subs {
 			out = append(out, store.Subtitle{Path: p, Lang: subtitleLang(p)})
 		}
 		return out
 	}
-	// Multi-strm folders: match by shared stem or shared SxxExx token.
-	target := strms[0]
-	stem := strings.TrimSuffix(filepath.Base(target), filepath.Ext(target))
-	_, targetEp, hasEp := meta.ParseSxExx(stem)
+	type targetStem struct {
+		stem          string
+		season, epNum int
+		hasSxExx      bool
+	}
+	stems := make([]targetStem, 0, len(targets))
+	for _, t := range targets {
+		stem := strings.TrimSuffix(filepath.Base(t), filepath.Ext(t))
+		sn, ep, ok := meta.ParseSxExx(stem)
+		stems = append(stems, targetStem{stem: stem, season: sn, epNum: ep, hasSxExx: ok})
+	}
 	var out []store.Subtitle
 	for _, p := range subs {
 		base := filepath.Base(p)
-		if strings.HasPrefix(base, stem) {
-			out = append(out, store.Subtitle{Path: p, Lang: subtitleLang(p)})
-			continue
-		}
-		if hasEp {
-			if _, ep, ok := meta.ParseSxExx(base); ok && ep == targetEp {
-				out = append(out, store.Subtitle{Path: p, Lang: subtitleLang(p)})
+		matched := false
+		for _, t := range stems {
+			if strings.HasPrefix(base, t.stem) {
+				matched = true
+				break
 			}
+			if t.hasSxExx {
+				if sn, ep, ok := meta.ParseSxExx(base); ok && sn == t.season && ep == t.epNum {
+					matched = true
+					break
+				}
+			}
+		}
+		if matched {
+			out = append(out, store.Subtitle{Path: p, Lang: subtitleLang(p)})
 		}
 	}
 	return out

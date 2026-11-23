@@ -6,6 +6,8 @@ import (
 	"image/png"
 	"os"
 	"path/filepath"
+	"sort"
+	"strconv"
 	"testing"
 	"time"
 
@@ -591,5 +593,211 @@ func TestScanDateAddedBackfill(t *testing.T) {
 	}
 	if st3 := sc3.Status(); st3.Items != 0 || st3.Skipped != 23 {
 		t.Errorf("post-backfill rescan items/skipped = %d/%d, want 0/23", st3.Items, st3.Skipped)
+	}
+}
+
+// --- batch 6: strict per-episode subtitle matching + scan logic version ---
+
+func wantSubNames(t *testing.T, label string, got []store.Subtitle, want []string) {
+	t.Helper()
+	names := make([]string, 0, len(got))
+	for _, s := range got {
+		names = append(names, filepath.Base(s.Path))
+	}
+	sort.Strings(names)
+	sort.Strings(want)
+	if len(names) != len(want) {
+		t.Fatalf("%s subtitles = %v, want %v", label, names, want)
+	}
+	for i := range want {
+		if names[i] != want[i] {
+			t.Fatalf("%s subtitles = %v, want %v", label, names, want)
+		}
+	}
+}
+
+// A season folder holding several episodes: each episode must get only
+// its own subtitles — same-stem ones and differently-named ones carrying
+// its SxxExx token — and never another episode's (the old code handed
+// every episode the whole folder's subtitles).
+func TestMatchSubtitlesStrictEpisodes(t *testing.T) {
+	dir := filepath.Join("lib", "Show", "Season 1")
+	e01 := filepath.Join(dir, "Show.S01E01.WEB-DL.strm")
+	e02 := filepath.Join(dir, "Show.S01E02.WEB-DL.strm")
+	files := []string{
+		e01, e02,
+		filepath.Join(dir, "Show.S01E01.WEB-DL.chs.srt"), // same stem as E01
+		filepath.Join(dir, "AltGroup.S01E01.cht.ass"),    // other stem, same SxxExx as E01
+		filepath.Join(dir, "Show.S01E02.WEB-DL.chs.srt"), // same stem as E02
+		filepath.Join(dir, "AltGroup.S01E02.eng.ass"),    // other stem, same SxxExx as E02
+		filepath.Join(dir, "Show.S01E03.WEB-DL.chs.srt"), // no E03 strm: nobody's
+	}
+	wantSubNames(t, "E01", matchSubtitles(files, 2, []string{e01}),
+		[]string{"Show.S01E01.WEB-DL.chs.srt", "AltGroup.S01E01.cht.ass"})
+	wantSubNames(t, "E02", matchSubtitles(files, 2, []string{e02}),
+		[]string{"Show.S01E02.WEB-DL.chs.srt", "AltGroup.S01E02.eng.ass"})
+}
+
+// A folder with a single strm keeps the blanket rule: every subtitle
+// belongs to that item, whatever its name.
+func TestMatchSubtitlesSingleStrmFolderAll(t *testing.T) {
+	dir := filepath.Join("lib", "Movie (2020)")
+	strm := filepath.Join(dir, "Some.Movie.2020.strm")
+	files := []string{
+		strm,
+		filepath.Join(dir, "Some.Movie.2020.chs.srt"),
+		filepath.Join(dir, "renamed-release.ass"),
+		filepath.Join(dir, "notes.txt"),
+	}
+	wantSubNames(t, "single-strm", matchSubtitles(files, 1, []string{strm}),
+		[]string{"Some.Movie.2020.chs.srt", "renamed-release.ass"})
+}
+
+// A multi-version movie folder matches strictly by stem: each version's
+// own subtitles land on the (single) movie item, unrelated files do not.
+func TestMatchSubtitlesMultiVersionMovie(t *testing.T) {
+	dir := filepath.Join("lib", "Movie (2020)")
+	v1 := filepath.Join(dir, "Movie.2020.1080p.strm")
+	v2 := filepath.Join(dir, "Movie.2020.2160p.strm")
+	files := []string{
+		v1, v2,
+		filepath.Join(dir, "Movie.2020.1080p.chs.srt"),
+		filepath.Join(dir, "Movie.2020.2160p.cht.srt"),
+		filepath.Join(dir, "unrelated.srt"),
+	}
+	wantSubNames(t, "multi-version", matchSubtitles(files, 2, []string{v1, v2}),
+		[]string{"Movie.2020.1080p.chs.srt", "Movie.2020.2160p.cht.srt"})
+}
+
+// End to end over a constructed tree: per-episode subtitle counts are
+// exact, the subtitles table holds exactly one row per subtitle file,
+// and the scan-logic version forces one full reprocess when it lags and
+// then returns to pure incremental scans.
+func TestScanLogicVersionAndEpisodeSubtitles(t *testing.T) {
+	base := t.TempDir()
+	movieDir := filepath.Join(base, "电影", "动画电影", "测试电影 (2020) {tmdbid-111}")
+	writeFile(t, filepath.Join(movieDir, "Mov.2020.strm"), "http://example.com/m.mkv\n")
+	writeFile(t, filepath.Join(movieDir, "Mov.2020.chs.srt"), "x")
+
+	seriesDir := filepath.Join(base, "电视剧", "国产剧", "测试剧集 (2021) {tmdbid-222}")
+	writeFile(t, filepath.Join(seriesDir, "tvshow.nfo"),
+		"<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<tvshow>\n  <title>测试剧集</title>\n</tvshow>\n")
+	seasonDir := filepath.Join(seriesDir, "Season 1")
+	e01Strm := filepath.Join(seasonDir, "Show.S01E01.strm")
+	e02Strm := filepath.Join(seasonDir, "Show.S01E02.strm")
+	writeFile(t, e01Strm, "http://example.com/e1.mkv\n")
+	writeFile(t, e02Strm, "http://example.com/e2.mkv\n")
+	writeFile(t, filepath.Join(seasonDir, "Show.S01E01.chs.srt"), "x")
+	writeFile(t, filepath.Join(seasonDir, "AltGroup.S01E01.cht.ass"), "x")
+	writeFile(t, filepath.Join(seasonDir, "Show.S01E02.chs.srt"), "x")
+
+	st := openTemp(t)
+	sc := New(st)
+	if err := sc.Scan(base); err != nil {
+		t.Fatal(err)
+	}
+
+	assertSubs := func() {
+		t.Helper()
+		ep1, err := st.GetItemByPath(e01Strm)
+		if err != nil || ep1 == nil {
+			t.Fatalf("ep1 = %v, err %v", ep1, err)
+		}
+		subs1, _ := st.SubtitlesOf(ep1.ID)
+		wantSubNames(t, "E01", subs1, []string{"Show.S01E01.chs.srt", "AltGroup.S01E01.cht.ass"})
+		ep2, err := st.GetItemByPath(e02Strm)
+		if err != nil || ep2 == nil {
+			t.Fatalf("ep2 = %v, err %v", ep2, err)
+		}
+		subs2, _ := st.SubtitlesOf(ep2.ID)
+		wantSubNames(t, "E02", subs2, []string{"Show.S01E02.chs.srt"})
+		movie, err := st.GetItemByPath(movieDir)
+		if err != nil || movie == nil {
+			t.Fatalf("movie = %v, err %v", movie, err)
+		}
+		msubs, _ := st.SubtitlesOf(movie.ID)
+		wantSubNames(t, "movie", msubs, []string{"Mov.2020.chs.srt"})
+		var total int
+		if err := st.DB().QueryRow(`SELECT COUNT(*) FROM subtitles`).Scan(&total); err != nil {
+			t.Fatal(err)
+		}
+		if total != 4 {
+			t.Errorf("subtitle rows = %d, want 4 (one per subtitle file)", total)
+		}
+	}
+	assertSubs()
+
+	libs, _ := st.ListLibraries()
+	var movieLibID, seriesLibID int64
+	for _, l := range libs {
+		if l.Kind == "movie" {
+			movieLibID = l.ID
+		} else {
+			seriesLibID = l.ID
+		}
+	}
+	versionOf := func(libID int64) string {
+		v, _ := st.GetSetting(logicVersionKey(libID))
+		return v
+	}
+	cur := strconv.Itoa(CurrentScanLogicVersion)
+
+	// The first full scan promoted both libraries' logic versions.
+	if versionOf(movieLibID) != cur || versionOf(seriesLibID) != cur {
+		t.Fatalf("stored logic versions = %q/%q, want %q", versionOf(movieLibID), versionOf(seriesLibID), cur)
+	}
+
+	// Versions current: pure incremental, everything skipped.
+	sc2 := New(st)
+	if err := sc2.Scan(base); err != nil {
+		t.Fatal(err)
+	}
+	if got := sc2.Status(); got.Items != 0 || got.Skipped != 5 {
+		t.Errorf("incremental rescan items/skipped = %d/%d, want 0/5", got.Items, got.Skipped)
+	}
+
+	// Versions are per library: downgrade both, then a single-library
+	// scan reprocesses and promotes only its own library.
+	for _, id := range []int64{movieLibID, seriesLibID} {
+		if err := st.SetSetting(logicVersionKey(id), "0"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	scLib := New(st)
+	if err := scLib.ScanLibraryByID(movieLibID); err != nil {
+		t.Fatal(err)
+	}
+	if got := scLib.Status(); got.Items != 1 {
+		t.Errorf("lagging single-library scan items = %d, want 1 (movie reprocessed)", got.Items)
+	}
+	if v := versionOf(movieLibID); v != cur {
+		t.Errorf("movie version after its scan = %q, want %q", v, cur)
+	}
+	if v := versionOf(seriesLibID); v != "0" {
+		t.Errorf("series version after movie-only scan = %q, want still 0", v)
+	}
+
+	// A full scan now forces only the still-lagging series library
+	// (series + season + 2 episodes), skips the movie, promotes the
+	// series version, and keeps subtitle assignments exact.
+	sc3 := New(st)
+	if err := sc3.Scan(base); err != nil {
+		t.Fatal(err)
+	}
+	if got := sc3.Status(); got.Items != 4 || got.Skipped != 1 {
+		t.Errorf("forced rescan items/skipped = %d/%d, want 4/1", got.Items, got.Skipped)
+	}
+	if v := versionOf(seriesLibID); v != cur {
+		t.Errorf("series version after forced scan = %q, want %q", v, cur)
+	}
+	assertSubs()
+
+	// And the next scan is incremental again.
+	sc4 := New(st)
+	if err := sc4.Scan(base); err != nil {
+		t.Fatal(err)
+	}
+	if got := sc4.Status(); got.Items != 0 || got.Skipped != 5 {
+		t.Errorf("post-force rescan items/skipped = %d/%d, want 0/5", got.Items, got.Skipped)
 	}
 }
