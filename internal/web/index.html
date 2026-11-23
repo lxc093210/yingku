@@ -607,9 +607,9 @@ function makeCard(it) {
   const d = document.createElement("div");
   d.className = "card";
   let inner = '<div class="pwrap">';
-  if (it.HasPoster) {
-    inner += '<img loading="lazy" decoding="async" src="' + kurl("/api/items/" + it.Id + "/image/poster?w=320") + '" alt="" onerror="this.remove()">';
-  }
+  // Always ask the endpoint: HasPoster only reflects LOCAL art; items
+  // without local posters get TMDB art lazily server-side.
+  inner += '<img loading="lazy" decoding="async" src="' + kurl("/api/items/" + it.Id + "/image/poster?w=320") + '" alt="" onerror="this.remove()">';
   inner += '<div class="fb" style="background:' + gradFor(it.Name) + '">' + esc(it.Name) + "</div>";
   inner += '<div class="veil">' + (it.CommunityRating ? '<span class="r">★ ' + it.CommunityRating.toFixed(1) + "</span> · " : "") + esc(it.Name) + "</div></div>";
   inner += '<div class="nm">' + esc(it.Name) + '</div><div class="yr">' + (it.ProductionYear || "") + (it.Type === "Series" ? " · 剧集" : "") + "</div>";
@@ -935,17 +935,13 @@ window.addEventListener("popstate", () => {
 function renderDetail(d, ctx) {
   const page = $("#detailPage");
   let h = "";
-  if (d.HasBackdrop) {
-    h += '<div class="dback"><img decoding="async" src="' + kurl("/api/items/" + d.Id + "/image/backdrop-hi") + '" alt="" onerror="this.remove()"><div class="dshade"></div></div>';
-  } else {
-    h += '<div class="dback"><div class="dshade"></div></div>';
-  }
+  h += '<div class="dback"><img decoding="async" src="' + kurl("/api/items/" + d.Id + "/image/backdrop-hi") + '" alt="" onerror="this.remove()"><div class="dshade"></div></div>';
   h += '<div class="dwrap">';
   h += '<div class="dtop"><button class="roundbtn" id="dBack" title="返回">‹</button>' +
        '<button class="roundbtn" id="dHomeBtn" title="首页">⌂</button></div>';
   h += '<div class="dmain">';
   h += '<div class="dposter"><div class="pwrap2">';
-  if (d.HasPoster) h += '<img decoding="async" src="' + kurl("/api/items/" + d.Id + "/image/poster?w=342") + '" alt="" onerror="this.remove()">';
+  h += '<img decoding="async" src="' + kurl("/api/items/" + d.Id + "/image/poster?w=342") + '" alt="" onerror="this.remove()">';
   h += '<div class="fb" style="background:' + gradFor(d.Name) + '">' + esc(d.Name) + "</div></div></div>";
   h += '<div class="dinfo"><h1>' + esc(d.Name) + "</h1>";
   if (d.OriginalTitle) h += '<div class="orig">' + esc(d.OriginalTitle) + "</div>";
@@ -1007,7 +1003,7 @@ function renderDetail(d, ctx) {
     h += '<div class="dsec">播出季</div><div class="seasonrail">';
     d.Seasons.forEach(sn => {
       h += '<div class="scard" data-season="' + sn.Id + '"><div class="swrap">';
-      if (d.HasPoster) h += '<img loading="lazy" decoding="async" src="' + kurl("/api/items/" + d.Id + "/image/poster?w=240") + '" alt="" onerror="this.remove()">';
+      h += '<img loading="lazy" decoding="async" src="' + kurl("/api/items/" + d.Id + "/image/poster?w=240") + '" alt="" onerror="this.remove()">';
       h += '<div class="fb" style="background:' + gradFor(d.Name) + '">' + esc(sn.Name) + "</div>";
       h += '<span class="cntbadge">' + (sn.Episodes || []).length + " 集</span></div>";
       h += '<div class="snm">' + esc(sn.Name) + "</div></div>";
