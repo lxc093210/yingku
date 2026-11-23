@@ -41,6 +41,11 @@ func libraryArtSignature(items []*store.Item) string {
 // pick signature. A single-pick library serves that item's backdrop
 // directly; two or more picks are composed into a collage.
 func (s *Server) libraryCover(libID int64) (string, string) {
+	// An uploaded cover (MediaCoverGenerator, via the Emby image
+	// upload endpoint) always wins over the built-in collage.
+	if up := s.libraryUploadFile(libID); up != "" {
+		return up, s.libraryUploadSig(libID)
+	}
 	items, err := s.st.LibraryArtworkItems(libID, 4)
 	if err != nil || len(items) == 0 {
 		return "", ""

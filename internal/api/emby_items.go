@@ -223,7 +223,15 @@ func (s *Server) embyLibraryDTO(l store.Library) embyItemDTO {
 	// the picked artwork set (a collage of the library's best-rated
 	// backdrops — see libraryCover), so a changed pick makes clients
 	// refetch instead of showing the stale cover forever.
-	if items, err := s.st.LibraryArtworkItems(l.ID, 4); err == nil && len(items) > 0 {
+	if sig := s.libraryUploadSig(l.ID); sig != "" {
+		// Uploaded cover override (MediaCoverGenerator): advertise
+		// its signature so clients fetch the generated cover.
+		tag := "yklib" + strconv.FormatInt(l.ID, 10) + "-" + sig
+		d.ImageTags = map[string]string{"Primary": tag}
+		d.BackdropImageTags = []string{tag}
+		ratio := 1.7777777777777777
+		d.PrimaryImageAspectRatio = &ratio
+	} else if items, err := s.st.LibraryArtworkItems(l.ID, 4); err == nil && len(items) > 0 {
 		tag := "yklib" + strconv.FormatInt(l.ID, 10) + "-" + libraryArtSignature(items)
 		d.ImageTags = map[string]string{"Primary": tag}
 		d.BackdropImageTags = []string{tag}
