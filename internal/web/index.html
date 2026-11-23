@@ -455,6 +455,20 @@
           style="flex:1;background:var(--panel);border:1px solid var(--line);color:var(--text);border-radius:8px;padding:9px 12px;font-size:14px;outline:none">
       </div>
       <div class="hint">使用自建 TMDB 代理时填代理地址：代理会在服务端注入 Key，此时可不填 Key；演员补齐与高清背景图都会走这个基址。</div>
+
+      <h3>API 密钥</h3>
+      <div class="hint" style="margin-bottom:10px">用于与 Nan（Emby 助手）、MoviePilot 等联动：在对方的 Emby 服务器配置里填影库地址（如 http://192.168.1.5:8097）和下面的密钥。密钥只保存在本机数据库。</div>
+      <div class="pathrow">
+        <input type="text" id="apiKeyInput" readonly placeholder="—" autocomplete="off"
+          style="flex:1;background:var(--panel);border:1px solid var(--line);color:var(--text);border-radius:8px;padding:9px 12px;font-size:13px;outline:none">
+        <button type="button" class="btn small" id="apiKeyCopy">复制</button>
+        <button type="button" class="btn small" id="apiKeyRegen">重新生成</button>
+      </div>
+      <label style="display:flex;align-items:center;gap:8px;font-size:14px;margin:14px 0 6px;cursor:pointer">
+        <input type="checkbox" id="apiAuthRequired" style="width:16px;height:16px;accent-color:var(--red,#e50914)">
+        要求密钥鉴权
+      </label>
+      <div class="hint">开启后，所有 API 请求必须带密钥（api_key 参数或 X-Emby-Token 头），网页端会自动附带。当前浏览器会记住密钥；其他浏览器首次打开时，在地址后加 ?api_key=密钥 访问一次即可记住。开启前请先复制保存好密钥，丢失密钥将无法通过网页管理（需在数据库中清除 api_auth_required 恢复）。</div>
     </div>
   </div>
 </div>
@@ -522,8 +536,28 @@
 <script>
 "use strict";
 const $ = s => document.querySelector(s);
+/* API key: remembered per browser so the UI keeps working when the
+   server switches "api_auth_required" on. A ?api_key=… in the URL is
+   adopted once (recovery path for a fresh browser). */
+let API_KEY = "";
+try {
+  const q = new URLSearchParams(location.search).get("api_key");
+  if (q) localStorage.setItem("yk_api_key", q);
+  API_KEY = localStorage.getItem("yk_api_key") || "";
+} catch (e) {}
+function setAPIKey(k) {
+  API_KEY = k || "";
+  try {
+    if (API_KEY) localStorage.setItem("yk_api_key", API_KEY);
+    else localStorage.removeItem("yk_api_key");
+  } catch (e) {}
+}
+function kurl(path) {
+  if (!API_KEY || typeof path !== "string" || !path.startsWith("/api/")) return path;
+  return path + (path.includes("?") ? "&" : "?") + "api_key=" + encodeURIComponent(API_KEY);
+}
 const api = async (path, opts) => {
-  const r = await fetch(path, opts || {});
+  const r = await fetch(kurl(path), opts || {});
   if (!r.ok) {
     let m = "请求失败 (" + r.status + ")";
     try { const j = await r.json(); if (j.error) m = j.error; } catch (e) {}
@@ -574,7 +608,7 @@ function makeCard(it) {
   d.className = "card";
   let inner = '<div class="pwrap">';
   if (it.HasPoster) {
-    inner += '<img loading="lazy" decoding="async" src="/api/items/' + it.Id + '/image/poster?w=320" alt="" onerror="this.remove()">';
+    inner += '<img loading="lazy" decoding="async" src="' + kurl("/api/items/" + it.Id + "/image/poster?w=320") + '" alt="" onerror="this.remove()">';
   }
   inner += '<div class="fb" style="background:' + gradFor(it.Name) + '">' + esc(it.Name) + "</div>";
   inner += '<div class="veil">' + (it.CommunityRating ? '<span class="r">★ ' + it.CommunityRating.toFixed(1) + "</span> · " : "") + esc(it.Name) + "</div></div>";
@@ -592,7 +626,7 @@ function makeContinueCard(it) {
   let inner = '<div class="cwrap">';
   // Always ask the endpoint: episodes own no images (HasBackdrop is
   // false) but the server falls back to the episode still / series art.
-  inner += '<img loading="lazy" decoding="async" src="/api/items/' + it.Id + '/image/backdrop?w=640" alt="" onerror="if(!this.dataset.f){this.dataset.f=1;this.src=\'/api/items/' + it.Id + '/image/poster?w=320\'}else{this.remove()}">';
+  inner += '<img loading="lazy" decoding="async" src="' + kurl("/api/items/" + it.Id + "/image/backdrop?w=640") + '" alt="" onerror="if(!this.dataset.f){this.dataset.f=1;this.src=\'' + kurl("/api/items/" + it.Id + "/image/poster?w=320") + '\'}else{this.remove()}">';
   inner += '<div class="fb" style="background:' + gradFor(it.SeriesName || it.Name) + '">' + esc(it.SeriesName || it.Name) + "</div>";
   if (pct > 0) inner += '<div class="pbar"><i style="width:' + pct + '%"></i></div>';
   inner += "</div>";
@@ -619,14 +653,14 @@ function makeLibCard(lib) {
   const thumbs = lib.Thumbs || [];
   let inner = '<div class="lmain">';
   if (thumbs.length) {
-    inner += '<img class="lbg" loading="lazy" decoding="async" src="/api/items/' + thumbs[0] + '/image/backdrop?w=640" alt="" onerror="if(!this.dataset.f){this.dataset.f=1;this.src=\'/api/items/' + thumbs[0] + '/image/poster?w=640\'}else{this.remove()}">';
+    inner += '<img class="lbg" loading="lazy" decoding="async" src="' + kurl("/api/items/" + thumbs[0] + "/image/backdrop?w=640") + '" alt="" onerror="if(!this.dataset.f){this.dataset.f=1;this.src=\'' + kurl("/api/items/" + thumbs[0] + "/image/poster?w=640") + '\'}else{this.remove()}">';
   }
   inner += '<div class="lshade" style="' + (thumbs.length ? "" : "background:" + gradFor(lib.Name)) + '"></div>';
   inner += '<div class="linfo"><div class="lname">' + esc(lib.Name) + '</div>' +
     '<div class="lkind">' + (KIND_EN[lib.Kind] || "MIXED") + "</div></div>";
   if (thumbs.length) {
     inner += '<div class="lstack">' + thumbs.slice(0, 3).map(id =>
-      '<img loading="lazy" decoding="async" src="/api/items/' + id + '/image/backdrop?w=240" alt="" onerror="if(!this.dataset.f){this.dataset.f=1;this.src=\'/api/items/' + id + '/image/poster?w=240\'}else{this.remove()}">').join("") + "</div>";
+      '<img loading="lazy" decoding="async" src="' + kurl("/api/items/" + id + "/image/backdrop?w=240") + '" alt="" onerror="if(!this.dataset.f){this.dataset.f=1;this.src=\'' + kurl("/api/items/" + id + "/image/poster?w=240") + '\'}else{this.remove()}">').join("") + "</div>";
   }
   inner += "</div>";
   inner += '<div class="lcap">' + esc(lib.Name) + "</div>";
@@ -902,7 +936,7 @@ function renderDetail(d, ctx) {
   const page = $("#detailPage");
   let h = "";
   if (d.HasBackdrop) {
-    h += '<div class="dback"><img decoding="async" src="/api/items/' + d.Id + '/image/backdrop-hi" alt="" onerror="this.remove()"><div class="dshade"></div></div>';
+    h += '<div class="dback"><img decoding="async" src="' + kurl("/api/items/" + d.Id + "/image/backdrop-hi") + '" alt="" onerror="this.remove()"><div class="dshade"></div></div>';
   } else {
     h += '<div class="dback"><div class="dshade"></div></div>';
   }
@@ -911,7 +945,7 @@ function renderDetail(d, ctx) {
        '<button class="roundbtn" id="dHomeBtn" title="首页">⌂</button></div>';
   h += '<div class="dmain">';
   h += '<div class="dposter"><div class="pwrap2">';
-  if (d.HasPoster) h += '<img decoding="async" src="/api/items/' + d.Id + '/image/poster?w=342" alt="" onerror="this.remove()">';
+  if (d.HasPoster) h += '<img decoding="async" src="' + kurl("/api/items/" + d.Id + "/image/poster?w=342") + '" alt="" onerror="this.remove()">';
   h += '<div class="fb" style="background:' + gradFor(d.Name) + '">' + esc(d.Name) + "</div></div></div>";
   h += '<div class="dinfo"><h1>' + esc(d.Name) + "</h1>";
   if (d.OriginalTitle) h += '<div class="orig">' + esc(d.OriginalTitle) + "</div>";
@@ -973,7 +1007,7 @@ function renderDetail(d, ctx) {
     h += '<div class="dsec">播出季</div><div class="seasonrail">';
     d.Seasons.forEach(sn => {
       h += '<div class="scard" data-season="' + sn.Id + '"><div class="swrap">';
-      if (d.HasPoster) h += '<img loading="lazy" decoding="async" src="/api/items/' + d.Id + '/image/poster?w=240" alt="" onerror="this.remove()">';
+      if (d.HasPoster) h += '<img loading="lazy" decoding="async" src="' + kurl("/api/items/" + d.Id + "/image/poster?w=240") + '" alt="" onerror="this.remove()">';
       h += '<div class="fb" style="background:' + gradFor(d.Name) + '">' + esc(sn.Name) + "</div>";
       h += '<span class="cntbadge">' + (sn.Episodes || []).length + " 集</span></div>";
       h += '<div class="snm">' + esc(sn.Name) + "</div></div>";
@@ -1032,7 +1066,7 @@ function epRowHTML(ep) {
     ? Math.min(100, Math.max(1, Math.round(ud.PlaybackPositionTicks / ep.RunTimeTicks * 100))) : 0;
   const ss = srcSummary(ep);
   let h = '<div class="ep" data-ep="' + ep.Id + '"><div class="no">' + (ep.IndexNumber != null ? ep.IndexNumber : "") + '</div>' +
-    '<img class="ethumb" loading="lazy" decoding="async" src="/api/items/' + ep.Id + '/image/backdrop?w=320" alt="" onerror="this.remove()"><div class="ti">';
+    '<img class="ethumb" loading="lazy" decoding="async" src="' + kurl("/api/items/" + ep.Id + "/image/backdrop?w=320") + '" alt="" onerror="this.remove()"><div class="ti">';
   h += '<div class="t">' + esc(ep.Name) + (ud.Played ? '<span class="chk">✓</span>' : "") + "</div>";
   if (ep.Overview) h += '<div class="s">' + esc(ep.Overview) + "</div>";
   if (ss) h += '<div class="s">' + esc(ss) + "</div>";
@@ -1107,7 +1141,7 @@ async function openPlayer(id) {
     player.lastReport = 0;
     $("#playerTitle").textContent = (info.SeriesName ? info.SeriesName + " · " : "") + (info.Name || "");
     const v = $("#playerVideo");
-    v.src = "/api/items/" + info.ItemId + "/stream";
+    v.src = kurl("/api/items/" + info.ItemId + "/stream");
     // Subtitle tracks: sidecar subtitles are converted to WebVTT by the
     // API and switched through the browser's native CC menu. (Embedded
     // audio tracks of the file itself cannot be switched in a browser —
@@ -1121,7 +1155,7 @@ async function openPlayer(id) {
         tr.kind = "subtitles";
         tr.label = sb.Label;
         tr.srclang = sb.Lang;
-        tr.src = "/api/subtitles/" + sb.Id + "/track";
+        tr.src = kurl("/api/subtitles/" + sb.Id + "/track");
         if (!chinesePicked && (sb.Lang === "zh-cn" || sb.Lang === "zh-tw")) {
           tr.default = true;
           chinesePicked = true;
@@ -1144,7 +1178,7 @@ async function openPlayer(id) {
 }
 function postProgress(positionSeconds, durationSeconds) {
   if (player.id == null) return;
-  fetch("/api/items/" + player.id + "/progress", {
+  fetch(kurl("/api/items/" + player.id + "/progress"), {
     method: "POST", headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ positionSeconds: positionSeconds || 0, durationSeconds: durationSeconds || 0 }),
     keepalive: true
@@ -1441,6 +1475,7 @@ async function openSettings() {
   await renderLibList();
   refreshStatsLine();
   refreshTMDBSetting();
+  refreshAPIKeySetting();
   try { $("#scanStat").textContent = fmtScanStatus(await api("/api/scan/status")); } catch (e) {}
 }
 $("#gear").addEventListener("click", openSettings);
@@ -1468,6 +1503,60 @@ $("#tmdbSave").addEventListener("click", async () => {
     refreshTMDBSetting();
   } catch (e) {
     toast("保存 TMDB 设置失败：" + e.message);
+  }
+});
+
+/* ---------------- settings: API key ---------------- */
+async function refreshAPIKeySetting() {
+  try {
+    const k = await api("/api/settings/api-key");
+    if (k.apiKey) {
+      $("#apiKeyInput").value = k.apiKey;
+      // Keep this browser's remembered key in sync with the server's,
+      // so enabling enforcement never locks the current browser out.
+      setAPIKey(k.apiKey);
+    }
+  } catch (e) { /* keep placeholder */ }
+  try {
+    const s = await api("/api/settings");
+    $("#apiAuthRequired").checked = !!s.apiAuthRequired;
+  } catch (e) {}
+}
+$("#apiKeyCopy").addEventListener("click", async () => {
+  const v = $("#apiKeyInput").value;
+  if (!v) { toast("密钥尚未加载"); return; }
+  try {
+    await navigator.clipboard.writeText(v);
+    toast("API 密钥已复制");
+  } catch (e) {
+    $("#apiKeyInput").select();
+    document.execCommand("copy");
+    toast("API 密钥已复制");
+  }
+});
+$("#apiKeyRegen").addEventListener("click", async () => {
+  if (!await askConfirm("重新生成后，旧密钥立即失效；已在 Nan / MoviePilot 等联动方登记的密钥需要同步更新。继续？")) return;
+  try {
+    const k = await api("/api/settings/api-key/regenerate", { method: "POST" });
+    $("#apiKeyInput").value = k.apiKey;
+    setAPIKey(k.apiKey);
+    toast("新密钥已生成，旧密钥已失效");
+  } catch (e) {
+    toast("生成失败：" + e.message);
+  }
+});
+$("#apiAuthRequired").addEventListener("change", async e => {
+  const on = e.target.checked;
+  try {
+    const s = await api("/api/settings", {
+      method: "PUT", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ apiAuthRequired: on })
+    });
+    e.target.checked = !!s.apiAuthRequired;
+    toast(s.apiAuthRequired ? "已开启密钥鉴权：API 请求需带密钥" : "已关闭密钥鉴权");
+  } catch (err) {
+    e.target.checked = !on;
+    toast("保存失败：" + err.message);
   }
 });
 

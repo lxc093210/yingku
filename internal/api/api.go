@@ -51,6 +51,10 @@ func New(st *store.Store, scanner *scan.Scanner, defaultRoot string) http.Handle
 		fsRoot = filepath.Clean(abs)
 	}
 	s := &Server{st: st, scanner: scanner, defaultRoot: defaultRoot, fsRoot: fsRoot, imgLocks: newKeyedLocks()}
+	// A key (and the stable server id) exist from first start so the
+	// settings page always has something usable to show/copy.
+	_, _ = s.ensureAPIKey()
+	_ = s.ensureServerID()
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/health", s.handleHealth)
 	mux.HandleFunc("GET /api/stats", s.handleStats)
@@ -77,12 +81,19 @@ func New(st *store.Store, scanner *scan.Scanner, defaultRoot string) http.Handle
 	mux.HandleFunc("POST /api/items/{id}/favorite", s.handleFavorite)
 	mux.HandleFunc("GET /api/settings", s.handleSettingsGet)
 	mux.HandleFunc("PUT /api/settings", s.handleSettingsPut)
+	mux.HandleFunc("GET /api/settings/api-key", s.handleAPIKeyGet)
+	mux.HandleFunc("POST /api/settings/api-key/regenerate", s.handleAPIKeyRegenerate)
+	// Emby-protocol handshake surface (Nan / Emby clients register here).
+	mux.HandleFunc("GET /emby/System/Info", s.handleSystemInfo)
+	mux.HandleFunc("GET /System/Info", s.handleSystemInfo)
+	mux.HandleFunc("GET /emby/System/Ping", s.handleSystemPing)
+	mux.HandleFunc("GET /System/Ping", s.handleSystemPing)
 	mux.HandleFunc("GET /api/search", s.handleSearch)
 	mux.HandleFunc("GET /api/fs/list", s.handleFSList)
 	mux.HandleFunc("POST /api/scan", s.handleScanStart)
 	mux.HandleFunc("GET /api/scan/status", s.handleScanStatus)
 	mux.HandleFunc("/", s.handleUI)
-	return mux
+	return s.authMiddleware(mux)
 }
 
 // ---- DTOs (Emby-shaped) ----
@@ -890,8 +901,9 @@ func (s *Server) handleFavorite(w http.ResponseWriter, r *http.Request) {
 // ---- app settings ----
 
 type settingsDTO struct {
-	TMDBKeySet  bool   `json:"tmdbKeySet"`
-	TMDBBaseURL string `json:"tmdbBaseUrl"`
+	TMDBKeySet      bool   `json:"tmdbKeySet"`
+	TMDBBaseURL     string `json:"tmdbBaseUrl"`
+	APIAuthRequired bool   `json:"apiAuthRequired"`
 }
 
 func (s *Server) settingsDTO() (settingsDTO, error) {
@@ -901,7 +913,11 @@ func (s *Server) settingsDTO() (settingsDTO, error) {
 	}
 	// Only whether a key exists is exposed — never the key itself. The
 	// base URL reported is the effective one (official default included).
-	return settingsDTO{TMDBKeySet: cfg.key != "", TMDBBaseURL: cfg.base}, nil
+	return settingsDTO{
+		TMDBKeySet:      cfg.key != "",
+		TMDBBaseURL:     cfg.base,
+		APIAuthRequired: s.authRequired(),
+	}, nil
 }
 
 func (s *Server) handleSettingsGet(w http.ResponseWriter, r *http.Request) {
@@ -916,8 +932,9 @@ func (s *Server) handleSettingsGet(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleSettingsPut(w http.ResponseWriter, r *http.Request) {
 	// Pointer fields distinguish "leave unchanged" from "set/clear".
 	var p struct {
-		TMDBAPIKey  *string `json:"tmdbApiKey"`
-		TMDBBaseURL *string `json:"tmdbBaseUrl"`
+		TMDBAPIKey      *string `json:"tmdbApiKey"`
+		TMDBBaseURL     *string `json:"tmdbBaseUrl"`
+		APIAuthRequired *bool   `json:"apiAuthRequired"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&p); err != nil {
 		writeErr(w, http.StatusBadRequest, "invalid JSON body")
@@ -935,6 +952,17 @@ func (s *Server) handleSettingsPut(w http.ResponseWriter, r *http.Request) {
 			base = "" // the official default needs no stored override
 		}
 		if err := s.st.SetSetting(settingTMDBBaseURL, base); err != nil {
+			writeErr(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+	}
+	if p.APIAuthRequired != nil {
+		v := ""
+		if *p.APIAuthRequired {
+			v = "true"
+		}
+		// An empty value deletes the row, which reads back as "off".
+		if err := s.st.SetSetting(settingAPIAuthRequired, v); err != nil {
 			writeErr(w, http.StatusInternalServerError, err.Error())
 			return
 		}
