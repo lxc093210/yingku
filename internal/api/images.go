@@ -273,12 +273,18 @@ func (s *Server) lazyTMDBArt(id int64, kind string) string {
 // file as-is, or — with a valid ?w= — a cached JPEG scaled to that
 // width (generated once, then served from cache/thumbs).
 func (s *Server) serveItemImage(w http.ResponseWriter, r *http.Request, id int64, kind string) {
+	s.serveItemImageW(w, r, id, kind, parseImageWidth(r))
+}
+
+// serveItemImageW is serveItemImage with the target width supplied by
+// the caller (the Emby image endpoint maps its maxWidth/width
+// parameters onto the same scale cache).
+func (s *Server) serveItemImageW(w http.ResponseWriter, r *http.Request, id int64, kind string, width int) {
 	src := s.resolveImageFile(id, kind)
 	if src == "" {
 		writeErr(w, http.StatusNotFound, "no such image")
 		return
 	}
-	width := parseImageWidth(r)
 	if width == 0 {
 		serveFile(w, r, src)
 		return

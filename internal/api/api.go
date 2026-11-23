@@ -86,14 +86,49 @@ func New(st *store.Store, scanner *scan.Scanner, defaultRoot string) http.Handle
 	// Emby-protocol handshake surface (Nan / Emby clients register here).
 	mux.HandleFunc("GET /emby/System/Info", s.handleSystemInfo)
 	mux.HandleFunc("GET /System/Info", s.handleSystemInfo)
+	mux.HandleFunc("GET /emby/System/Info/Public", s.handleSystemInfo)
+	mux.HandleFunc("GET /System/Info/Public", s.handleSystemInfo)
 	mux.HandleFunc("GET /emby/System/Ping", s.handleSystemPing)
 	mux.HandleFunc("GET /System/Ping", s.handleSystemPing)
+	// Emby core read surface (batch 9): the endpoints Nan's Emby helper
+	// needs to browse and play the library. Every route exists with and
+	// without the /emby prefix.
+	mux.HandleFunc("GET /emby/Users/Public", s.handleUsersPublic)
+	mux.HandleFunc("GET /Users/Public", s.handleUsersPublic)
+	mux.HandleFunc("POST /emby/Users/AuthenticateByName", s.handleAuthenticateByName)
+	mux.HandleFunc("POST /Users/AuthenticateByName", s.handleAuthenticateByName)
+	mux.HandleFunc("GET /emby/Library/MediaFolders", s.handleMediaFolders)
+	mux.HandleFunc("GET /Library/MediaFolders", s.handleMediaFolders)
+	mux.HandleFunc("GET /emby/Items", s.handleEmbyItems)
+	mux.HandleFunc("GET /Items", s.handleEmbyItems)
+	mux.HandleFunc("GET /emby/Users/{userId}/Items", s.handleEmbyItems)
+	mux.HandleFunc("GET /Users/{userId}/Items", s.handleEmbyItems)
+	mux.HandleFunc("GET /emby/Items/{id}", s.handleEmbyItem)
+	mux.HandleFunc("GET /Items/{id}", s.handleEmbyItem)
+	mux.HandleFunc("GET /emby/Users/{userId}/Items/{id}", s.handleEmbyItem)
+	mux.HandleFunc("GET /Users/{userId}/Items/{id}", s.handleEmbyItem)
+	mux.HandleFunc("GET /emby/Items/{id}/Images/{imageType}", s.handleEmbyImage)
+	mux.HandleFunc("GET /Items/{id}/Images/{imageType}", s.handleEmbyImage)
+	mux.HandleFunc("GET /emby/Items/{id}/Images/{imageType}/{index}", s.handleEmbyImage)
+	mux.HandleFunc("GET /Items/{id}/Images/{imageType}/{index}", s.handleEmbyImage)
+	mux.HandleFunc("/emby/Items/{id}/PlaybackInfo", s.handleEmbyPlaybackInfo)
+	mux.HandleFunc("/Items/{id}/PlaybackInfo", s.handleEmbyPlaybackInfo)
+	mux.HandleFunc("GET /emby/Videos/{id}/stream", s.handleEmbyVideoStream)
+	mux.HandleFunc("GET /Videos/{id}/stream", s.handleEmbyVideoStream)
+	mux.HandleFunc("GET /emby/Videos/{id}/{file}", s.handleEmbyVideoStream)
+	mux.HandleFunc("GET /Videos/{id}/{file}", s.handleEmbyVideoStream)
+	mux.HandleFunc("POST /emby/Sessions/Playing", s.handleSessionReport)
+	mux.HandleFunc("POST /Sessions/Playing", s.handleSessionReport)
+	mux.HandleFunc("POST /emby/Sessions/Playing/Progress", s.handleSessionReport)
+	mux.HandleFunc("POST /Sessions/Playing/Progress", s.handleSessionReport)
+	mux.HandleFunc("POST /emby/Sessions/Playing/Stopped", s.handleSessionReport)
+	mux.HandleFunc("POST /Sessions/Playing/Stopped", s.handleSessionReport)
 	mux.HandleFunc("GET /api/search", s.handleSearch)
 	mux.HandleFunc("GET /api/fs/list", s.handleFSList)
 	mux.HandleFunc("POST /api/scan", s.handleScanStart)
 	mux.HandleFunc("GET /api/scan/status", s.handleScanStatus)
 	mux.HandleFunc("/", s.handleUI)
-	return s.authMiddleware(mux)
+	return s.logMiddleware(s.authMiddleware(mux))
 }
 
 // ---- DTOs (Emby-shaped) ----
@@ -765,6 +800,12 @@ func (s *Server) handleStream(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "bad item id")
 		return
 	}
+	s.serveItemStream(w, r, id)
+}
+
+// serveItemStream is the stream redirect for a known item id, shared
+// by the web UI endpoint and the Emby Videos/{id}/stream endpoints.
+func (s *Server) serveItemStream(w http.ResponseWriter, r *http.Request, id int64) {
 	it, err := s.st.GetItem(id)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())
@@ -1141,10 +1182,21 @@ func (s *Server) handleScanStatus(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, s.scanner.Status())
 }
 
+// json404Prefixes are the API surfaces whose unknown sub-paths must
+// answer a JSON 404 instead of falling through to the SPA page — an
+// HTML answer is what made Nan report `invalid character '<'` when it
+// asked for a not-yet-implemented /emby/* path.
+var json404Prefixes = []string{
+	"/api/", "/emby/", "/System/", "/Users/", "/Library/",
+	"/Items/", "/Videos/", "/Sessions/",
+}
+
 func (s *Server) handleUI(w http.ResponseWriter, r *http.Request) {
-	if strings.HasPrefix(r.URL.Path, "/api/") {
-		writeErr(w, http.StatusNotFound, "not found")
-		return
+	for _, p := range json404Prefixes {
+		if strings.HasPrefix(r.URL.Path, p) {
+			writeErr(w, http.StatusNotFound, "not found")
+			return
+		}
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	_, _ = w.Write(web.IndexHTML)

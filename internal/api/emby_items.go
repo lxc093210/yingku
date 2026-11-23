@@ -1,0 +1,723 @@
+package api
+
+import (
+	"encoding/json"
+	"net/http"
+	"net/url"
+	"path"
+	"path/filepath"
+	"strconv"
+	"strings"
+	"time"
+
+	"yingku/internal/store"
+)
+
+// ---- Emby core read surface (Nan integration) ----
+//
+// The endpoints Nan's Emby helper needs to browse and play the library:
+// MediaFolders, Items (list + detail), item images, PlaybackInfo,
+// Videos stream redirect, session progress reporting and the by-name
+// authentication handshake. yingku stays a pure protocol server: item
+// paths handed out are the STRM targets themselves (Nan's 8115 URLs);
+// the actual 302 to the 115 CDN happens in Nan, exactly as with a real
+// Emby server. The /Videos/{id}/stream endpoints exist for direct
+// clients and mirror the web UI's own 302.
+//
+// Library ids and item ids live in separate tables, so in the Emby
+// surface a CollectionFolder's Id is the library id shifted by
+// embyLibraryIDOffset — an id Nan passes back as ParentId can then be
+// decoded unambiguously, and item ParentIds pointing at their library
+// stay consistent with the MediaFolders listing.
+
+const embyLibraryIDOffset = int64(1_000_000_000)
+
+func embyLibraryID(libID int64) string {
+	return strconv.FormatInt(libID+embyLibraryIDOffset, 10)
+}
+
+// ---- DTOs ----
+
+type embyUserDataDTO struct {
+	IsFavorite            bool    `json:"IsFavorite"`
+	Played                bool    `json:"Played"`
+	PlaybackPositionTicks int64   `json:"PlaybackPositionTicks"`
+	PlayedPercentage      float64 `json:"PlayedPercentage,omitempty"`
+}
+
+type embyItemDTO struct {
+	Id                string            `json:"Id"`
+	Name              string            `json:"Name"`
+	Type              string            `json:"Type"`
+	CollectionType    string            `json:"CollectionType,omitempty"`
+	Overview          string            `json:"Overview,omitempty"`
+	ProductionYear    int               `json:"ProductionYear,omitempty"`
+	CommunityRating   float64           `json:"CommunityRating,omitempty"`
+	RunTimeTicks      int64             `json:"RunTimeTicks,omitempty"`
+	ProviderIds       map[string]string `json:"ProviderIds,omitempty"`
+	SeriesName        string            `json:"SeriesName,omitempty"`
+	SeriesId          string            `json:"SeriesId,omitempty"`
+	SeasonId          string            `json:"SeasonId,omitempty"`
+	ParentId          string            `json:"ParentId,omitempty"`
+	IndexNumber       *int              `json:"IndexNumber,omitempty"`
+	ParentIndexNumber *int              `json:"ParentIndexNumber,omitempty"`
+	ChildCount        *int              `json:"ChildCount,omitempty"`
+	MediaType         string            `json:"MediaType,omitempty"`
+	IsFolder          bool              `json:"IsFolder"`
+	DateCreated       string            `json:"DateCreated,omitempty"`
+	ImageTags         map[string]string `json:"ImageTags,omitempty"`
+	BackdropImageTags []string          `json:"BackdropImageTags,omitempty"`
+	UserData          *embyUserDataDTO  `json:"UserData,omitempty"`
+}
+
+type embyItemsResponse struct {
+	Items            []embyItemDTO `json:"Items"`
+	TotalRecordCount int           `json:"TotalRecordCount"`
+	StartIndex       int           `json:"StartIndex"`
+}
+
+// hasArtwork is the lightweight availability check behind ImageTags: a
+// local registered file or an already-cached TMDB download counts —
+// crucially, unlike resolveImageFile it never triggers a TMDB fetch,
+// so listing pages stay fast. Episodes/seasons follow the same series
+// chain as the image endpoint (an episode's own still cache is its
+// tmdb-art backdrop slot, covered by the cache check).
+func (s *Server) hasArtwork(it *store.Item, kind string) bool {
+	if s.localImageFile(it.ID, kind) != "" {
+		return true
+	}
+	if fileExists(s.tmdbArtFile(it.ID, kind)) {
+		return true
+	}
+	if it.Type == "episode" || it.Type == "season" {
+		if series := s.seriesItemOf(it); series != nil && series.ID != it.ID {
+			return s.hasArtwork(series, kind)
+		}
+	}
+	return false
+}
+
+// embyDTOs converts items, batch-loading child counts, user data and
+// series names so a full page costs a constant number of queries.
+func (s *Server) embyDTOs(items []*store.Item) ([]embyItemDTO, error) {
+	out := make([]embyItemDTO, 0, len(items))
+	if len(items) == 0 {
+		return out, nil
+	}
+	ids := make([]int64, 0, len(items))
+	seriesIDs := map[int64]bool{}
+	for _, it := range items {
+		ids = append(ids, it.ID)
+		if it.SeriesID != nil {
+			seriesIDs[*it.SeriesID] = true
+		}
+	}
+	counts, err := s.st.ChildCounts(ids)
+	if err != nil {
+		return nil, err
+	}
+	uds, err := s.st.UserDataBatch(defaultUserID, ids)
+	if err != nil {
+		return nil, err
+	}
+	sids := make([]int64, 0, len(seriesIDs))
+	for id := range seriesIDs {
+		sids = append(sids, id)
+	}
+	titles, err := s.st.TitlesByID(sids)
+	if err != nil {
+		return nil, err
+	}
+	for _, it := range items {
+		out = append(out, s.toEmbyDTO(it, counts, uds, titles))
+	}
+	return out, nil
+}
+
+func (s *Server) toEmbyDTO(it *store.Item, counts map[int64]int, uds map[int64]*store.UserData, seriesTitles map[int64]string) embyItemDTO {
+	d := embyItemDTO{
+		Id:             strconv.FormatInt(it.ID, 10),
+		Name:           it.Title,
+		Type:           embyType[it.Type],
+		Overview:       it.Overview,
+		ProductionYear: it.Year,
+		IsFolder:       it.Type == "series" || it.Type == "season",
+	}
+	if it.Rating > 0 {
+		d.CommunityRating = it.Rating
+	}
+	if it.RuntimeMin > 0 {
+		d.RunTimeTicks = int64(it.RuntimeMin) * 60 * 10_000_000
+	}
+	if it.TmdbID > 0 {
+		d.ProviderIds = map[string]string{"Tmdb": strconv.Itoa(it.TmdbID)}
+	}
+	if it.ParentID != nil {
+		d.ParentId = strconv.FormatInt(*it.ParentID, 10)
+	} else {
+		d.ParentId = embyLibraryID(it.LibraryID)
+	}
+	if it.SeriesID != nil {
+		d.SeriesId = strconv.FormatInt(*it.SeriesID, 10)
+		d.SeriesName = seriesTitles[*it.SeriesID]
+	}
+	switch it.Type {
+	case "episode":
+		d.IndexNumber = it.EpisodeNum
+		d.ParentIndexNumber = it.SeasonNum
+		if it.ParentID != nil {
+			d.SeasonId = strconv.FormatInt(*it.ParentID, 10)
+		}
+		d.MediaType = "Video"
+	case "movie":
+		d.MediaType = "Video"
+	case "season":
+		d.IndexNumber = it.SeasonNum
+	}
+	if it.Type == "series" || it.Type == "season" {
+		n := counts[it.ID]
+		d.ChildCount = &n
+	}
+	if ts := it.DateAdded; ts > 0 {
+		d.DateCreated = time.Unix(ts, 0).UTC().Format(time.RFC3339)
+	} else if it.CreatedAt > 0 {
+		d.DateCreated = time.Unix(it.CreatedAt, 0).UTC().Format(time.RFC3339)
+	}
+	tag := "yk" + strconv.FormatInt(it.ID, 10)
+	if s.hasArtwork(it, "poster") {
+		d.ImageTags = map[string]string{"Primary": tag}
+	}
+	if s.hasArtwork(it, "backdrop") {
+		d.BackdropImageTags = []string{tag}
+	}
+	if ud, ok := uds[it.ID]; ok && ud != nil {
+		eu := &embyUserDataDTO{
+			IsFavorite:            ud.Favorite,
+			Played:                ud.Played,
+			PlaybackPositionTicks: ud.ProgressTicks,
+		}
+		if d.RunTimeTicks > 0 && ud.ProgressTicks > 0 {
+			eu.PlayedPercentage = float64(ud.ProgressTicks) / float64(d.RunTimeTicks) * 100
+		}
+		d.UserData = eu
+	}
+	return d
+}
+
+func embyLibraryDTO(l store.Library) embyItemDTO {
+	ct := map[string]string{"movie": "movies", "series": "tvshows", "mixed": "mixed"}[l.Kind]
+	n := l.ItemCount
+	return embyItemDTO{
+		Id:             embyLibraryID(l.ID),
+		Name:           l.Name,
+		Type:           "CollectionFolder",
+		CollectionType: ct,
+		IsFolder:       true,
+		ChildCount:     &n,
+	}
+}
+
+func (s *Server) libraryEmbyDTOs() ([]embyItemDTO, int, error) {
+	libs, err := s.st.ListLibraries()
+	if err != nil {
+		return nil, 0, err
+	}
+	out := make([]embyItemDTO, 0, len(libs))
+	for _, l := range libs {
+		out = append(out, embyLibraryDTO(l))
+	}
+	return out, len(out), nil
+}
+
+// ---- handlers ----
+
+func (s *Server) handleMediaFolders(w http.ResponseWriter, r *http.Request) {
+	dtos, total, err := s.libraryEmbyDTOs()
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, embyItemsResponse{Items: dtos, TotalRecordCount: total, StartIndex: 0})
+}
+
+func (s *Server) handleUsersPublic(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, []any{})
+}
+
+// queryParam reads the first non-empty of the given parameter names
+// (Emby's canonical casing first, then a lowercase variant).
+func queryParam(q url.Values, names ...string) string {
+	for _, n := range names {
+		if v := q.Get(n); v != "" {
+			return v
+		}
+	}
+	return ""
+}
+
+func (s *Server) handleEmbyItems(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	idsParam := queryParam(q, "Ids", "ids")
+	parentParam := queryParam(q, "ParentId", "parentId")
+
+	start, _ := strconv.Atoi(queryParam(q, "StartIndex", "startIndex"))
+	if start < 0 {
+		start = 0
+	}
+	limit, _ := strconv.Atoi(queryParam(q, "Limit", "limit"))
+
+	// No scope: the library list, as CollectionFolders.
+	if idsParam == "" && parentParam == "" {
+		dtos, total, err := s.libraryEmbyDTOs()
+		if err != nil {
+			writeErr(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		writeJSON(w, http.StatusOK, embyItemsResponse{Items: dtos, TotalRecordCount: total, StartIndex: 0})
+		return
+	}
+
+	filter := store.ItemsFilter{Start: start, Limit: limit}
+	if idsParam != "" {
+		for _, part := range strings.Split(idsParam, ",") {
+			part = strings.TrimSpace(part)
+			if part == "" {
+				continue
+			}
+			v, err := strconv.ParseInt(part, 10, 64)
+			if err != nil {
+				continue
+			}
+			if v >= embyLibraryIDOffset {
+				// A CollectionFolder id inside Ids: resolve to the library.
+				if lib, gerr := s.st.GetLibrary(v - embyLibraryIDOffset); gerr == nil && lib != nil {
+					dtos, total, lerr := s.libraryEmbyDTOs()
+					if lerr != nil {
+						writeErr(w, http.StatusInternalServerError, lerr.Error())
+						return
+					}
+					for _, d := range dtos {
+						if d.Id == strconv.FormatInt(v, 10) {
+							writeJSON(w, http.StatusOK, embyItemsResponse{
+								Items: []embyItemDTO{d}, TotalRecordCount: 1, StartIndex: 0})
+							return
+						}
+					}
+					_ = total
+				}
+				continue
+			}
+			filter.IDs = append(filter.IDs, v)
+		}
+	} else {
+		v, err := strconv.ParseInt(parentParam, 10, 64)
+		if err != nil {
+			writeJSON(w, http.StatusOK, embyItemsResponse{Items: []embyItemDTO{}, TotalRecordCount: 0, StartIndex: start})
+			return
+		}
+		filter.HasParent = true
+		if v >= embyLibraryIDOffset {
+			filter.ParentIsLibrary = true
+			filter.ParentLibraryID = v - embyLibraryIDOffset
+		} else {
+			filter.ParentItemID = v
+		}
+		filter.Recursive = strings.EqualFold(queryParam(q, "Recursive", "recursive"), "true")
+	}
+
+	if inc := queryParam(q, "IncludeItemTypes", "includeItemTypes"); inc != "" {
+		known := map[string]bool{}
+		for _, tok := range strings.Split(inc, ",") {
+			switch strings.ToLower(strings.TrimSpace(tok)) {
+			case "movie", "series", "season", "episode":
+				known[strings.ToLower(strings.TrimSpace(tok))] = true
+			}
+		}
+		if len(known) == 0 {
+			// Only unknown types requested (e.g. Folder): nothing matches.
+			writeJSON(w, http.StatusOK, embyItemsResponse{Items: []embyItemDTO{}, TotalRecordCount: 0, StartIndex: start})
+			return
+		}
+		for t := range known {
+			filter.Types = append(filter.Types, t)
+		}
+	}
+	filter.Search = queryParam(q, "SearchTerm", "searchTerm")
+	if sb := queryParam(q, "SortBy", "sortBy"); sb != "" {
+		if first := strings.TrimSpace(strings.Split(sb, ",")[0]); strings.EqualFold(first, "DateCreated") {
+			filter.SortField = "date"
+		}
+	}
+	filter.Desc = strings.EqualFold(queryParam(q, "SortOrder", "sortOrder"), "Descending")
+
+	items, total, err := s.st.QueryItems(filter)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	dtos, err := s.embyDTOs(items)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, embyItemsResponse{Items: dtos, TotalRecordCount: total, StartIndex: start})
+}
+
+func (s *Server) handleEmbyItem(w http.ResponseWriter, r *http.Request) {
+	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, "bad item id")
+		return
+	}
+	if id >= embyLibraryIDOffset {
+		lib, err := s.st.GetLibrary(id - embyLibraryIDOffset)
+		if err != nil {
+			writeErr(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		if lib == nil {
+			writeErr(w, http.StatusNotFound, "item not found")
+			return
+		}
+		writeJSON(w, http.StatusOK, embyLibraryDTO(*lib))
+		return
+	}
+	it, err := s.st.GetItem(id)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if it == nil {
+		writeErr(w, http.StatusNotFound, "item not found")
+		return
+	}
+	dtos, err := s.embyDTOs([]*store.Item{it})
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, dtos[0])
+}
+
+// ---- images ----
+
+// parseEmbyWidth maps Emby's maxWidth/width parameters onto the same
+// 40–1280 window the internal ?w= accepts; anything else means "serve
+// the original".
+func parseEmbyWidth(r *http.Request) int {
+	for _, name := range []string{"maxWidth", "width", "w"} {
+		v := r.URL.Query().Get(name)
+		if v == "" {
+			continue
+		}
+		if n, err := strconv.Atoi(v); err == nil && n >= 40 && n <= 1280 {
+			return n
+		}
+		return 0
+	}
+	return 0
+}
+
+func (s *Server) handleEmbyImage(w http.ResponseWriter, r *http.Request) {
+	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, "bad item id")
+		return
+	}
+	var kind string
+	switch strings.ToLower(r.PathValue("imageType")) {
+	case "primary":
+		kind = "poster"
+	case "backdrop", "thumb":
+		kind = "backdrop"
+	default:
+		writeErr(w, http.StatusNotFound, "unknown image type")
+		return
+	}
+	s.serveItemImageW(w, r, id, kind, parseEmbyWidth(r))
+}
+
+// ---- PlaybackInfo ----
+
+type embyMediaStreamDTO struct {
+	Type         string `json:"Type"`
+	Index        int    `json:"Index"`
+	Codec        string `json:"Codec,omitempty"`
+	Width        int    `json:"Width,omitempty"`
+	Height       int    `json:"Height,omitempty"`
+	Language     string `json:"Language,omitempty"`
+	DisplayTitle string `json:"DisplayTitle,omitempty"`
+}
+
+type embyMediaSourceDTO struct {
+	Id                   string               `json:"Id"`
+	Name                 string               `json:"Name"`
+	Path                 string               `json:"Path"`
+	Protocol             string               `json:"Protocol"`
+	Container            string               `json:"Container,omitempty"`
+	Type                 string               `json:"Type"`
+	SupportsDirectPlay   bool                 `json:"SupportsDirectPlay"`
+	SupportsDirectStream bool                 `json:"SupportsDirectStream"`
+	SupportsTranscoding  bool                 `json:"SupportsTranscoding"`
+	RunTimeTicks         int64                `json:"RunTimeTicks,omitempty"`
+	MediaStreams         []embyMediaStreamDTO `json:"MediaStreams,omitempty"`
+}
+
+type embyPlaybackInfoDTO struct {
+	MediaSources  []embyMediaSourceDTO `json:"MediaSources"`
+	PlaySessionId string               `json:"PlaySessionId"`
+}
+
+// mediaStreamsOf builds the Emby stream list of a source from the
+// stored mediainfo: one video stream from the probed dimensions/codec,
+// plus one audio stream per entry of the audio summary
+// ("truehd 7.1 (eng), aac 2.0" — the trailing "· N subs" note is not a
+// stream and is dropped).
+func mediaStreamsOf(src store.MediaSource) []embyMediaStreamDTO {
+	var out []embyMediaStreamDTO
+	idx := 0
+	if src.Width > 0 || src.Height > 0 || src.VideoCodec != "" {
+		st := embyMediaStreamDTO{Type: "Video", Index: idx, Codec: src.VideoCodec, Width: src.Width, Height: src.Height}
+		idx++
+		var parts []string
+		// Tier by width or height, whichever is higher: cropped 2160p
+		// content (3840x1904) must not be labelled 1080p.
+		switch {
+		case src.Width >= 3800 || src.Height >= 2000:
+			parts = append(parts, "2160p")
+		case src.Width >= 1900 || src.Height >= 1000:
+			parts = append(parts, "1080p")
+		case src.Width >= 1200 || src.Height >= 700:
+			parts = append(parts, "720p")
+		case src.Height > 0:
+			parts = append(parts, strconv.Itoa(src.Height)+"p")
+		}
+		if src.VideoCodec != "" {
+			parts = append(parts, strings.ToUpper(src.VideoCodec))
+		}
+		if src.HDR != "" {
+			parts = append(parts, src.HDR)
+		}
+		st.DisplayTitle = strings.Join(parts, " ")
+		out = append(out, st)
+	}
+	summary := src.AudioSummary
+	if i := strings.Index(summary, " · "); i >= 0 {
+		summary = summary[:i]
+	}
+	for _, entry := range strings.Split(summary, ", ") {
+		entry = strings.TrimSpace(entry)
+		if entry == "" {
+			continue
+		}
+		st := embyMediaStreamDTO{Type: "Audio", Index: idx, DisplayTitle: entry}
+		idx++
+		st.Codec = strings.Fields(entry)[0]
+		if open := strings.LastIndex(entry, "("); open >= 0 && strings.HasSuffix(entry, ")") {
+			st.Language = entry[open+1 : len(entry)-1]
+		}
+		out = append(out, st)
+	}
+	return out
+}
+
+// mediaFileName picks the display file name for a media source: the
+// real file name at the end of the STRM target URL, else the .strm
+// file's own stem.
+func mediaFileName(targetURL, strmPath string) string {
+	if targetURL != "" {
+		if u, err := url.Parse(targetURL); err == nil && u.Path != "" {
+			if base := path.Base(u.Path); base != "." && base != "/" {
+				return base
+			}
+		}
+		return filepath.Base(targetURL)
+	}
+	return filepath.Base(strmPath)
+}
+
+func (s *Server) handleEmbyPlaybackInfo(w http.ResponseWriter, r *http.Request) {
+	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, "bad item id")
+		return
+	}
+	it, err := s.st.GetItem(id)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if it == nil {
+		writeErr(w, http.StatusNotFound, "item not found")
+		return
+	}
+	target := it
+	if it.Type == "series" || it.Type == "season" {
+		target, err = s.resolvePlayable(it)
+		if err != nil {
+			writeErr(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+	}
+	resp := embyPlaybackInfoDTO{MediaSources: []embyMediaSourceDTO{}}
+	if target == nil {
+		resp.PlaySessionId = "yk-" + strconv.FormatInt(id, 10)
+		writeJSON(w, http.StatusOK, resp)
+		return
+	}
+	resp.PlaySessionId = "yk-" + strconv.FormatInt(target.ID, 10)
+	srcs, err := s.st.SourcesOf(target.ID)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if len(srcs) == 0 {
+		writeJSON(w, http.StatusOK, resp)
+		return
+	}
+	src := srcs[0]
+	targetURL := ""
+	if src.StrmPath != "" {
+		targetURL = readStrmTarget(src.StrmPath)
+	}
+	name := mediaFileName(targetURL, src.StrmPath)
+	playPath := targetURL
+	if playPath == "" {
+		playPath = "http://" + r.Host + "/api/items/" + strconv.FormatInt(target.ID, 10) + "/stream"
+	}
+	container := ""
+	if ext := filepath.Ext(name); ext != "" {
+		container = strings.ToLower(strings.TrimPrefix(ext, "."))
+	}
+	ms := embyMediaSourceDTO{
+		Id:                   strconv.FormatInt(target.ID, 10),
+		Name:                 name,
+		Path:                 playPath,
+		Protocol:             "Http",
+		Container:            container,
+		Type:                 "Default",
+		SupportsDirectPlay:   true,
+		SupportsDirectStream: true,
+		SupportsTranscoding:  false,
+		MediaStreams:         mediaStreamsOf(src),
+	}
+	if target.RuntimeMin > 0 {
+		ms.RunTimeTicks = int64(target.RuntimeMin) * 60 * 10_000_000
+	}
+	resp.MediaSources = append(resp.MediaSources, ms)
+	writeJSON(w, http.StatusOK, resp)
+}
+
+// ---- Videos stream (direct clients) ----
+
+func (s *Server) handleEmbyVideoStream(w http.ResponseWriter, r *http.Request) {
+	if f := r.PathValue("file"); f != "" && !strings.HasPrefix(f, "stream.") {
+		writeErr(w, http.StatusNotFound, "not found")
+		return
+	}
+	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, "bad item id")
+		return
+	}
+	s.serveItemStream(w, r, id)
+}
+
+// ---- session progress reporting ----
+
+// flexID accepts an Emby id as either a JSON string or a JSON number.
+type flexID string
+
+func (f *flexID) UnmarshalJSON(b []byte) error {
+	b = []byte(strings.TrimSpace(string(b)))
+	if len(b) == 0 || string(b) == "null" {
+		*f = ""
+		return nil
+	}
+	if b[0] == '"' {
+		var s string
+		if err := json.Unmarshal(b, &s); err != nil {
+			return err
+		}
+		*f = flexID(s)
+		return nil
+	}
+	var n int64
+	if err := json.Unmarshal(b, &n); err != nil {
+		return err
+	}
+	*f = flexID(strconv.FormatInt(n, 10))
+	return nil
+}
+
+type sessionReport struct {
+	ItemId        flexID `json:"ItemId"`
+	PositionTicks int64  `json:"PositionTicks"`
+}
+
+// handleSessionReport records a Sessions/Playing[/Progress|/Stopped]
+// report into the same user_data the web UI uses (played at >=90% of
+// the item's runtime, matching the web progress semantics) and always
+// answers 204: a progress report must never fail playback.
+func (s *Server) handleSessionReport(w http.ResponseWriter, r *http.Request) {
+	var p sessionReport
+	if r.Body != nil {
+		_ = json.NewDecoder(r.Body).Decode(&p)
+	}
+	if id, err := strconv.ParseInt(string(p.ItemId), 10, 64); err == nil && id > 0 {
+		if it, gerr := s.st.GetItem(id); gerr == nil && it != nil {
+			ticks := p.PositionTicks
+			if ticks < 0 {
+				ticks = 0
+			}
+			played := false
+			if rt := int64(it.RuntimeMin) * 60 * 10_000_000; rt > 0 && ticks*10 >= rt*9 {
+				played = true
+			}
+			_ = s.st.UpsertProgress(id, defaultUserID, ticks, played, time.Now().Unix())
+		}
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// ---- authentication ----
+
+type authenticateByNameRequest struct {
+	Username string `json:"Username"`
+	Pw       string `json:"Pw"`
+}
+
+// handleAuthenticateByName answers Emby's by-name login. yingku has no
+// user accounts (single-user LAN server), so the password is not
+// checked; the caller gets the stable server-derived user id and the
+// current API key as its access token, which is what Nan and Emby
+// clients need to keep calling the API.
+func (s *Server) handleAuthenticateByName(w http.ResponseWriter, r *http.Request) {
+	var req authenticateByNameRequest
+	if r.Body != nil {
+		_ = json.NewDecoder(r.Body).Decode(&req)
+	}
+	name := strings.TrimSpace(req.Username)
+	if name == "" {
+		name = "yingku"
+	}
+	key, err := s.ensureAPIKey()
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	userID := s.ensureServerID()
+	writeJSON(w, http.StatusOK, map[string]any{
+		"User": map[string]any{
+			"Id":                    userID,
+			"Name":                  name,
+			"HasPassword":           false,
+			"HasConfiguredPassword": false,
+		},
+		"AccessToken": key,
+		"SessionInfo": map[string]any{
+			"Id":     "yk-session",
+			"UserId": userID,
+		},
+	})
+}

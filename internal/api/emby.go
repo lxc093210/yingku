@@ -12,9 +12,9 @@ import (
 // and System/Ping (liveness). Both are served with and without the
 // /emby prefix, as Emby clients and Nan's Emby helper use either base.
 //
-// The full endpoint set (Items, PlaybackInfo, Sessions, …) is phase 3
-// and will grow under these same /emby/* routes; see the batch report
-// for the planned order.
+// The core read surface (MediaFolders, Items, images, PlaybackInfo,
+// session reporting, by-name auth) lives in emby_items.go under these
+// same /emby/* routes.
 
 // systemInfoDTO mirrors Emby's SystemInfo shape (PascalCase fields).
 type systemInfoDTO struct {

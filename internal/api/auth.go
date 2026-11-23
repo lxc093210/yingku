@@ -140,11 +140,15 @@ func requestAuthed(r *http.Request) bool {
 
 // isAPIPath reports whether path is an API surface (as opposed to the
 // static web UI): yingku's own /api/, plus the Emby-style /emby/ and
-// root-level /System/ routes.
+// root-level Emby routes.
 func isAPIPath(path string) bool {
-	return strings.HasPrefix(path, "/api/") ||
-		strings.HasPrefix(path, "/emby/") ||
-		strings.HasPrefix(path, "/System/")
+	for _, p := range []string{"/api/", "/emby/", "/System/", "/Users/",
+		"/Library/", "/Items/", "/Videos/", "/Sessions/"} {
+		if strings.HasPrefix(path, p) {
+			return true
+		}
+	}
+	return false
 }
 
 // authMiddleware recognizes Emby-style credentials on every request and
