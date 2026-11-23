@@ -219,11 +219,12 @@ func (s *Server) embyLibraryDTO(l store.Library) embyItemDTO {
 		ChildCount:     &n,
 	}
 	// Library cover: clients only request a CollectionFolder's image
-	// when the DTO advertises one. The image endpoint resolves the
-	// tag back to a representative item's backdrop (see
-	// handleEmbyImage), so the tag just needs to be stable per library.
-	if artID, err := s.st.LibraryArtworkItem(l.ID); err == nil && artID > 0 {
-		tag := "yklib" + strconv.FormatInt(l.ID, 10)
+	// when the DTO advertises one. The tag carries the signature of
+	// the picked artwork set (a collage of the library's best-rated
+	// backdrops — see libraryCover), so a changed pick makes clients
+	// refetch instead of showing the stale cover forever.
+	if items, err := s.st.LibraryArtworkItems(l.ID, 4); err == nil && len(items) > 0 {
+		tag := "yklib" + strconv.FormatInt(l.ID, 10) + "-" + libraryArtSignature(items)
 		d.ImageTags = map[string]string{"Primary": tag}
 		d.BackdropImageTags = []string{tag}
 		ratio := 1.7777777777777777
@@ -466,16 +467,11 @@ func (s *Server) handleEmbyImage(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusNotFound, "unknown image type")
 		return
 	}
-	// A CollectionFolder id serves the library's representative
-	// artwork (the newest item's backdrop) for every image type —
-	// client home screens render library tiles in landscape.
+	// A CollectionFolder id serves the library's composed cover
+	// (see libraryCover) for every image type — client home screens
+	// render library tiles in landscape.
 	if id >= embyLibraryIDOffset {
-		artID, err := s.st.LibraryArtworkItem(id - embyLibraryIDOffset)
-		if err != nil || artID == 0 {
-			writeErr(w, http.StatusNotFound, "no such image")
-			return
-		}
-		s.serveItemImageW(w, r, artID, "backdrop", parseEmbyWidth(r))
+		s.serveLibraryImage(w, r, id-embyLibraryIDOffset, parseEmbyWidth(r))
 		return
 	}
 	s.serveItemImageW(w, r, id, kind, parseEmbyWidth(r))
