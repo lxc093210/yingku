@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"sort"
 	"strings"
+	"unicode"
 	"time"
 
 	"yingku/internal/store"
@@ -194,6 +195,8 @@ func fetchTMDBEpisodeStill(cfg tmdbConfig, tmdbID, seasonNum, episodeNum int) (s
 }
 
 type tmdbDetails struct {
+	Title          string  `json:"title"` // movies
+	Name           string  `json:"name"`  // series
 	Overview       string  `json:"overview"`
 	VoteAverage    float64 `json:"vote_average"`
 	Runtime        int     `json:"runtime"`          // movies
@@ -207,18 +210,22 @@ type tmdbDetails struct {
 // overview, community rating, genre names and runtime in minutes
 // (episode runtime for series). Language is zh-CN so filled overviews
 // and genre names match the library's predominantly Chinese metadata.
-func fetchTMDBDetails(cfg tmdbConfig, kind string, tmdbID int) (overview string, rating float64, genres []string, runtimeMin int, err error) {
+func fetchTMDBDetails(cfg tmdbConfig, kind string, tmdbID int) (title, overview string, rating float64, genres []string, runtimeMin int, err error) {
 	resp, err := cfg.get(tmdbClient, fmt.Sprintf("/%s/%d?language=zh-CN", kind, tmdbID))
 	if err != nil {
-		return "", 0, nil, 0, err
+		return "", "", 0, nil, 0, err
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return "", 0, nil, 0, fmt.Errorf("tmdb details: status %d", resp.StatusCode)
+		return "", "", 0, nil, 0, fmt.Errorf("tmdb details: status %d", resp.StatusCode)
 	}
 	var d tmdbDetails
 	if err := json.NewDecoder(resp.Body).Decode(&d); err != nil {
-		return "", 0, nil, 0, err
+		return "", "", 0, nil, 0, err
+	}
+	title = d.Title
+	if title == "" {
+		title = d.Name
 	}
 	genres = []string{}
 	for _, g := range d.Genres {
@@ -230,7 +237,19 @@ func fetchTMDBDetails(cfg tmdbConfig, kind string, tmdbID int) (overview string,
 	if runtimeMin == 0 && len(d.EpisodeRunTime) > 0 {
 		runtimeMin = d.EpisodeRunTime[0]
 	}
-	return d.Overview, d.VoteAverage, genres, runtimeMin, nil
+	return title, d.Overview, d.VoteAverage, genres, runtimeMin, nil
+}
+
+// hasHan reports whether s contains at least one Han (Chinese)
+// character — the test for "this text is Chinese" in the metadata
+// language preference (Chinese first, other languages as fallback).
+func hasHan(s string) bool {
+	for _, r := range s {
+		if unicode.Is(unicode.Han, r) {
+			return true
+		}
+	}
+	return false
 }
 
 // fetchTMDBBackdrop picks the widest backdrop file_path for a movie or

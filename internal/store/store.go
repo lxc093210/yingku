@@ -805,6 +805,58 @@ func (s *Store) FillItemMeta(id int64, overview string, rating float64, genres [
 	return err
 }
 
+// FillItemTitle replaces an item's title and sort title (the
+// scanner keeps sort_title equal to the title). Used by the TMDB
+// Chinese-title fill, which fires only when the current title has
+// no Chinese characters and TMDB's zh-CN title does.
+func (s *Store) FillItemTitle(id int64, title string) error {
+	_, err := s.db.Exec(`UPDATE items SET title = ?, sort_title = ? WHERE id = ?`, title, title, id)
+	return err
+}
+
+// TopLevelTmdbItems returns every top-level item carrying a TMDB
+// id, ordered by id — the candidate set for metadata maintenance
+// passes (Chinese-title fill, artwork warm-up).
+func (s *Store) TopLevelTmdbItems() ([]*Item, error) {
+	rows, err := s.db.Query(`SELECT ` + itemCols + ` FROM items
+		WHERE parent_id IS NULL AND tmdb_id > 0 ORDER BY id`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []*Item
+	for rows.Next() {
+		it, err := scanItem(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, it)
+	}
+	return out, rows.Err()
+}
+
+// TopLevelMissingPosterIDs returns the ids of top-level TMDB items
+// with no registered local poster image, ordered by id.
+func (s *Store) TopLevelMissingPosterIDs() ([]int64, error) {
+	rows, err := s.db.Query(`SELECT i.id FROM items i
+		WHERE i.parent_id IS NULL AND i.tmdb_id > 0
+		AND NOT EXISTS (SELECT 1 FROM images g WHERE g.item_id = i.id AND g.kind = 'poster')
+		ORDER BY i.id`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []int64
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		out = append(out, id)
+	}
+	return out, rows.Err()
+}
+
 // GetSubtitle returns one subtitle row by id, or nil.
 func (s *Store) GetSubtitle(id int64) (*Subtitle, error) {
 	var sub Subtitle

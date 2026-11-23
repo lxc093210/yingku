@@ -19,6 +19,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"yingku/internal/scan"
@@ -41,6 +42,8 @@ type Server struct {
 	defaultRoot string
 	fsRoot      string
 	imgLocks    *keyedLocks
+	bfMu        sync.Mutex
+	bf          backfillState
 }
 
 // New builds the HTTP handler.
@@ -179,6 +182,8 @@ func New(st *store.Store, scanner *scan.Scanner, defaultRoot string) http.Handle
 	mux.HandleFunc("DELETE /Users/{userId}/PlayedItems/{itemId}", s.handlePlayedItems)
 	mux.HandleFunc("GET /api/search", s.handleSearch)
 	mux.HandleFunc("GET /api/fs/list", s.handleFSList)
+	mux.HandleFunc("POST /api/maintenance/tmdb-backfill", s.handleBackfillStart)
+	mux.HandleFunc("GET /api/maintenance/tmdb-backfill/status", s.handleBackfillStatus)
 	mux.HandleFunc("POST /api/scan", s.handleScanStart)
 	mux.HandleFunc("GET /api/scan/status", s.handleScanStatus)
 	mux.HandleFunc("/", s.handleUI)
@@ -662,14 +667,28 @@ func (s *Server) handleItem(w http.ResponseWriter, r *http.Request) {
 	// and fill ONLY the empty fields — NFO values always win. The item
 	// is re-read afterwards so this very response carries the new data.
 	// Best-effort like the cast fill below: failures keep local data.
-	if (it.Type == "movie" || it.Type == "series") && it.TmdbID > 0 && (it.Overview == "" || it.Rating == 0) {
+	if (it.Type == "movie" || it.Type == "series") && it.TmdbID > 0 && (it.Overview == "" || it.Rating == 0 || !hasHan(it.Title)) {
 		if cfg, cerr := s.tmdbCfg(); cerr == nil && cfg.available() {
 			kind := "movie"
 			if it.Type == "series" {
 				kind = "tv"
 			}
-			if ov, rating, genres, runtime, ferr := fetchTMDBDetails(cfg, kind, it.TmdbID); ferr == nil {
+			if title, ov, rating, genres, runtime, ferr := fetchTMDBDetails(cfg, kind, it.TmdbID); ferr == nil {
+				filled := false
 				if uerr := s.st.FillItemMeta(it.ID, ov, rating, genres, runtime); uerr == nil {
+					filled = true
+				}
+				// Language preference: Chinese metadata by default.
+				// A title with no Chinese characters is replaced by
+				// TMDB's zh-CN title when that one is Chinese; when
+				// TMDB has no Chinese title either, the current
+				// (English/other) title stays.
+				if title != "" && title != it.Title && !hasHan(it.Title) && hasHan(title) {
+					if uerr := s.st.FillItemTitle(it.ID, title); uerr == nil {
+						filled = true
+					}
+				}
+				if filled {
 					if fresh, gerr := s.st.GetItem(it.ID); gerr == nil && fresh != nil {
 						it = fresh
 					}
