@@ -159,7 +159,8 @@ func imgURL(id int64, kind string) string {
 }
 
 // ① An episode with no still on TMDB falls back to the series' local
-// backdrop; a season does the same; an episode poster is the series'
+// backdrop; a season does the same; an episode poster is the
+// episode's own still when TMDB has one (batch 18), else the series'
 // local poster.
 func TestEpisodeImageFallsBackToSeriesLocal(t *testing.T) {
 	still := jpegBytes(t, 780, 439, color.RGBA{R: 200, G: 200, B: 30, A: 255})
@@ -178,13 +179,20 @@ func TestEpisodeImageFallsBackToSeriesLocal(t *testing.T) {
 	if code != 200 || !bytes.Equal(body, fx.localBd) {
 		t.Fatalf("season backdrop = %d, %d bytes; want series local backdrop", code, len(body))
 	}
-	// Episode poster comes straight from the series (never the still).
+	// Episode poster is the episode's own still (batch 18: clients
+	// list episodes by Primary; the series poster made every episode
+	// wear the same cover).
 	code, body, _ = getRaw(t, fx.h, imgURL(fx.ep1ID, "poster"))
-	if code != 200 || !bytes.Equal(body, fx.localPoster) {
-		t.Fatalf("ep1 poster = %d, %d bytes; want series local poster", code, len(body))
+	if code != 200 || !bytes.Equal(body, still) {
+		t.Fatalf("ep1 poster = %d, %d bytes; want episode still", code, len(body))
 	}
-	if n := atomic.LoadInt32(stillDL); n != 0 {
-		t.Fatalf("still downloads = %d, want 0 (poster must not fetch a still)", n)
+	if n := atomic.LoadInt32(stillDL); n != 1 {
+		t.Fatalf("still downloads = %d, want 1 (poster fetched the still)", n)
+	}
+	// Episode 2 has no still: its poster falls back to the series'.
+	code, body, _ = getRaw(t, fx.h, imgURL(fx.ep2ID, "poster"))
+	if code != 200 || !bytes.Equal(body, fx.localPoster) {
+		t.Fatalf("ep2 poster = %d, %d bytes; want series local poster", code, len(body))
 	}
 }
 
@@ -245,18 +253,19 @@ func TestEpisodeImageFallsBackToSeriesTMDBArt(t *testing.T) {
 	if cached, err := os.ReadFile(seriesArt); err != nil || !bytes.Equal(cached, backdrop) {
 		t.Fatalf("series backdrop cache = %v, %d bytes", err, len(cached))
 	}
-	// Episode poster → series TMDB poster.
+	// Episode poster → the episode's own still (batch 18), not the
+	// series' TMDB poster.
 	code, body, _ = getRaw(t, fx.h, imgURL(fx.ep1ID, "poster"))
-	if code != 200 || !bytes.Equal(body, poster) {
-		t.Fatalf("ep1 poster = %d, %d bytes; want series TMDB poster", code, len(body))
+	if code != 200 || !bytes.Equal(body, still) {
+		t.Fatalf("ep1 poster = %d, %d bytes; want episode still", code, len(body))
 	}
-	if n := atomic.LoadInt32(artDL); n != 2 {
-		t.Fatalf("series art downloads = %d, want 2 (backdrop + poster, each once)", n)
+	if n := atomic.LoadInt32(artDL); n != 1 {
+		t.Fatalf("series art downloads = %d, want 1 (backdrop only; poster used the still)", n)
 	}
 	// Repeats are cache hits.
 	_, _, _ = getRaw(t, fx.h, imgURL(fx.ep2ID, "backdrop"))
 	_, _, _ = getRaw(t, fx.h, imgURL(fx.ep1ID, "poster"))
-	if n := atomic.LoadInt32(artDL); n != 2 {
-		t.Fatalf("series art downloads after repeats = %d, want 2", n)
+	if n := atomic.LoadInt32(artDL); n != 1 {
+		t.Fatalf("series art downloads after repeats = %d, want 1", n)
 	}
 }
