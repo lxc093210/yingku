@@ -163,6 +163,8 @@ func New(st *store.Store, scanner *scan.Scanner, defaultRoot string) http.Handle
 	mux.HandleFunc("GET /Shows/{seriesId}/Episodes", s.handleShowEpisodes)
 	mux.HandleFunc("GET /emby/Items/{id}/Similar", s.handleSimilar)
 	mux.HandleFunc("GET /Items/{id}/Similar", s.handleSimilar)
+	mux.HandleFunc("GET /emby/Items/Counts", s.handleItemCounts)
+	mux.HandleFunc("GET /Items/Counts", s.handleItemCounts)
 	mux.HandleFunc("GET /emby/Search/Hints", s.handleSearchHints)
 	mux.HandleFunc("GET /Search/Hints", s.handleSearchHints)
 	mux.HandleFunc("GET /emby/System/Endpoint", s.handleSystemEndpoint)

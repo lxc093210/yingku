@@ -96,9 +96,15 @@ func (s *Store) QueryItems(f ItemsFilter) ([]*Item, int, error) {
 	if f.Desc {
 		dir = "DESC"
 	}
-	col := "sort_title"
+	orderBy := "sort_title " + dir + ", id " + dir
 	if f.SortField == "date" {
-		col = "date_added"
+		orderBy = "date_added " + dir + ", id " + dir
+	}
+	if f.SortField == "index" {
+		// Episodes/seasons in story order. A name sort would scramble
+		// them: episode sort_titles are episode names, and season
+		// names sort "季 10" before "季 2".
+		orderBy = "season_num ASC, episode_num ASC, sort_title ASC, id ASC"
 	}
 	limit := f.Limit
 	if limit <= 0 {
@@ -106,7 +112,7 @@ func (s *Store) QueryItems(f ItemsFilter) ([]*Item, int, error) {
 	}
 	pageArgs := append(append([]any{}, allArgs...), limit, f.Start)
 	rows, err := s.db.Query(cte+`SELECT `+itemCols+` FROM items WHERE `+whereSQL+
-		` ORDER BY `+col+` `+dir+`, id `+dir+` LIMIT ? OFFSET ?`, pageArgs...)
+		` ORDER BY `+orderBy+` LIMIT ? OFFSET ?`, pageArgs...)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -123,6 +129,26 @@ func (s *Store) QueryItems(f ItemsFilter) ([]*Item, int, error) {
 		return nil, 0, err
 	}
 	return out, total, nil
+}
+
+// TypeCounts returns the item count per type across the library,
+// behind the Emby Items/Counts endpoint.
+func (s *Store) TypeCounts() (map[string]int, error) {
+	rows, err := s.db.Query(`SELECT type, COUNT(*) FROM items GROUP BY type`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[string]int{}
+	for rows.Next() {
+		var t string
+		var n int
+		if err := rows.Scan(&t, &n); err != nil {
+			return nil, err
+		}
+		out[t] = n
+	}
+	return out, rows.Err()
 }
 
 // SimilarItems returns top-level items similar to the given one for

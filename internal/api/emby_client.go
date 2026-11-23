@@ -242,6 +242,31 @@ func (s *Server) writeEmbyItemsPage(w http.ResponseWriter, r *http.Request, filt
 	writeJSON(w, http.StatusOK, embyItemsResponse{Items: dtos, TotalRecordCount: total, StartIndex: filter.Start})
 }
 
+// handleItemCounts answers GET Items/Counts with library totals in
+// Emby's ItemCounts shape. (Without a dedicated route the path falls
+// into Items/{id} with id "Counts" and 400s.)
+func (s *Server) handleItemCounts(w http.ResponseWriter, r *http.Request) {
+	counts, err := s.st.TypeCounts()
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"MovieCount":   counts["movie"],
+		"SeriesCount":  counts["series"],
+		"EpisodeCount": counts["episode"],
+		"ArtistCount":  0,
+		"AlbumCount":   0,
+		"SongCount":    0,
+		"GameCount":    0,
+		"GameSystemCount": 0,
+		"TrailerCount": 0,
+		"MusicVideoCount": 0,
+		"BoxSetCount":  0,
+		"BookCount":    0,
+	})
+}
+
 func (s *Server) handleShowSeasons(w http.ResponseWriter, r *http.Request) {
 	seriesID, err := strconv.ParseInt(r.PathValue("seriesId"), 10, 64)
 	if err != nil {
@@ -251,7 +276,7 @@ func (s *Server) handleShowSeasons(w http.ResponseWriter, r *http.Request) {
 	start, limit := embyPageParams(r.URL.Query())
 	s.writeEmbyItemsPage(w, r, store.ItemsFilter{
 		HasParent: true, ParentItemID: seriesID,
-		Types: []string{"season"}, Start: start, Limit: limit,
+		Types: []string{"season"}, Start: start, Limit: limit, SortField: "index",
 	})
 }
 
@@ -262,7 +287,7 @@ func (s *Server) handleShowEpisodes(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	start, limit := embyPageParams(r.URL.Query())
-	filter := store.ItemsFilter{Types: []string{"episode"}, Start: start, Limit: limit, HasParent: true}
+	filter := store.ItemsFilter{Types: []string{"episode"}, Start: start, Limit: limit, HasParent: true, SortField: "index"}
 	if season := queryParam(r.URL.Query(), "SeasonId", "seasonId"); season != "" {
 		if sid, err := strconv.ParseInt(season, 10, 64); err == nil {
 			filter.ParentItemID = sid

@@ -367,6 +367,17 @@ func (s *Server) handleEmbyItems(w http.ResponseWriter, r *http.Request) {
 				filter.SortField = "date"
 			}
 		}
+		if strings.Contains(sb, "IndexNumber") {
+			filter.SortField = "index"
+		}
+	}
+	// Episode-only and season-only listings default to story order:
+	// Emby's own name sort keys for episodes embed the season/episode
+	// numbers, while yingku's sort_title is the bare episode name, so
+	// a name sort presents episodes scrambled.
+	if filter.SortField == "" && len(filter.Types) == 1 &&
+		(filter.Types[0] == "episode" || filter.Types[0] == "season") {
+		filter.SortField = "index"
 	}
 	filter.Desc = strings.EqualFold(queryParam(q, "SortOrder", "sortOrder"), "Descending")
 
