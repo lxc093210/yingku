@@ -219,6 +219,90 @@ func (s *Server) handleNextUp(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, embyItemsResponse{Items: dtos, TotalRecordCount: len(dtos), StartIndex: 0})
 }
 
+// ---- Shows/{id}/Seasons, /Episodes, Items/{id}/Similar ----
+//
+// Series pages in clients like SenPlayer are built from these three
+// routes (not from Items drill-down): without Seasons the page has
+// no episodes at all — it renders as an empty detail that cannot
+// play. Similar feeds the recommendation row under a detail page.
+
+// writeEmbyItemsPage runs a filter and writes the standard Items
+// response with full DTOs for the calling user.
+func (s *Server) writeEmbyItemsPage(w http.ResponseWriter, r *http.Request, filter store.ItemsFilter) {
+	items, total, err := s.st.QueryItems(filter)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	dtos, err := s.embyDTOs(s.currentUserID(r), items)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, embyItemsResponse{Items: dtos, TotalRecordCount: total, StartIndex: filter.Start})
+}
+
+func (s *Server) handleShowSeasons(w http.ResponseWriter, r *http.Request) {
+	seriesID, err := strconv.ParseInt(r.PathValue("seriesId"), 10, 64)
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, "bad series id")
+		return
+	}
+	start, limit := embyPageParams(r.URL.Query())
+	s.writeEmbyItemsPage(w, r, store.ItemsFilter{
+		HasParent: true, ParentItemID: seriesID,
+		Types: []string{"season"}, Start: start, Limit: limit,
+	})
+}
+
+func (s *Server) handleShowEpisodes(w http.ResponseWriter, r *http.Request) {
+	seriesID, err := strconv.ParseInt(r.PathValue("seriesId"), 10, 64)
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, "bad series id")
+		return
+	}
+	start, limit := embyPageParams(r.URL.Query())
+	filter := store.ItemsFilter{Types: []string{"episode"}, Start: start, Limit: limit, HasParent: true}
+	if season := queryParam(r.URL.Query(), "SeasonId", "seasonId"); season != "" {
+		if sid, err := strconv.ParseInt(season, 10, 64); err == nil {
+			filter.ParentItemID = sid
+			s.writeEmbyItemsPage(w, r, filter)
+			return
+		}
+	}
+	filter.ParentItemID = seriesID
+	filter.Recursive = true
+	s.writeEmbyItemsPage(w, r, filter)
+}
+
+func (s *Server) handleSimilar(w http.ResponseWriter, r *http.Request) {
+	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, "bad item id")
+		return
+	}
+	_, limit := embyPageParams(r.URL.Query())
+	if limit <= 0 {
+		limit = 20
+	}
+	it, err := s.st.GetItem(id)
+	if err != nil || it == nil {
+		writeJSON(w, http.StatusOK, embyItemsResponse{Items: []embyItemDTO{}, TotalRecordCount: 0, StartIndex: 0})
+		return
+	}
+	items, err := s.st.SimilarItems(it, limit)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	dtos, err := s.embyDTOs(s.currentUserID(r), items)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, embyItemsResponse{Items: dtos, TotalRecordCount: len(dtos), StartIndex: 0})
+}
+
 // ---- Search/Hints ----
 
 type searchHintDTO struct {

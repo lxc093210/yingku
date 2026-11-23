@@ -125,6 +125,37 @@ func (s *Store) QueryItems(f ItemsFilter) ([]*Item, int, error) {
 	return out, total, nil
 }
 
+// SimilarItems returns top-level items similar to the given one for
+// client recommendation rows: same library first, items sharing the
+// first genre ranked ahead, then newest first.
+func (s *Store) SimilarItems(item *Item, limit int) ([]*Item, error) {
+	if limit <= 0 || limit > 100 {
+		limit = 20
+	}
+	genre := ""
+	if len(item.Genres) > 0 {
+		genre = strings.TrimSpace(item.Genres[0])
+	}
+	q := `SELECT ` + itemCols + ` FROM items
+		WHERE parent_id IS NULL AND id != ? AND library_id = ?
+		ORDER BY (CASE WHEN ? != '' AND genres LIKE ? THEN 0 ELSE 1 END),
+			date_added DESC, id DESC LIMIT ?`
+	rows, err := s.db.Query(q, item.ID, item.LibraryID, genre, "%"+genre+"%", limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []*Item
+	for rows.Next() {
+		it, err := scanItem(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, it)
+	}
+	return out, rows.Err()
+}
+
 // LibraryArtworkItem returns the id of the item whose artwork best
 // represents a library on client home screens: the newest top-level
 // item with a registered backdrop, falling back to one with a poster.
