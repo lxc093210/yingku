@@ -50,6 +50,14 @@ func (s *Server) handleSystemInfo(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// handleServerDomains answers Emby's System/Ext/ServerDomains probe
+// (SenPlayer polls it while adding/refreshing a server and treats a
+// non-200 as an unreadable server). yingku has no extra domains, so
+// the correct answer is an empty list.
+func (s *Server) handleServerDomains(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, []any{})
+}
+
 func (s *Server) handleSystemPing(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	w.WriteHeader(http.StatusOK)

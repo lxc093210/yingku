@@ -103,6 +103,8 @@ func New(st *store.Store, scanner *scan.Scanner, defaultRoot string) http.Handle
 	mux.HandleFunc("GET /System/Info/Public", s.handleSystemInfo)
 	mux.HandleFunc("GET /emby/System/Ping", s.handleSystemPing)
 	mux.HandleFunc("GET /System/Ping", s.handleSystemPing)
+	mux.HandleFunc("GET /emby/System/Ext/ServerDomains", s.handleServerDomains)
+	mux.HandleFunc("GET /System/Ext/ServerDomains", s.handleServerDomains)
 	// Emby core read surface (batch 9): the endpoints Nan's Emby helper
 	// needs to browse and play the library. Every route exists with and
 	// without the /emby prefix.
