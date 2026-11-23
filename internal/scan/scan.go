@@ -7,6 +7,7 @@
 package scan
 
 import (
+	"encoding/json"
 	"bytes"
 	"crypto/sha1"
 	"encoding/binary"
@@ -47,7 +48,7 @@ type Status struct {
 // library: a library whose stored version lags is fully reprocessed on
 // its next scan — all fingerprint skips disabled — and its version is
 // written back when that scan completes.
-const CurrentScanLogicVersion = 1
+const CurrentScanLogicVersion = 2
 
 const scanLogicVersionKey = "scan_logic_version"
 
@@ -692,6 +693,7 @@ func (s *Scanner) processMovieFolder(w *writer, index map[string]store.IndexEntr
 			StrmPath: strm, TargetURL: readStrm(strm),
 			Width: mi.Width, Height: mi.Height, VideoCodec: mi.VideoCodec,
 			HDR: mi.HDR, AudioSummary: mi.AudioSummary, MediaInfoSource: mi.Source,
+			StreamsJSON: streamsJSON(mi), SizeBytes: mi.Size, Bitrate: mi.Bitrate,
 		})
 	}
 	if it.RuntimeMin == 0 {
@@ -894,6 +896,7 @@ func (s *Scanner) processEpisode(w *writer, index map[string]store.IndexEntry, s
 			StrmPath: strm, TargetURL: readStrm(strm),
 			Width: mi.Width, Height: mi.Height, VideoCodec: mi.VideoCodec,
 			HDR: mi.HDR, AudioSummary: mi.AudioSummary, MediaInfoSource: mi.Source,
+			StreamsJSON: streamsJSON(mi), SizeBytes: mi.Size, Bitrate: mi.Bitrate,
 		}},
 		subs:   matchSubtitles(siblings, len(filterExt(siblings, ".strm")), []string{strm}),
 		people: actorsToPeople(epNFO),
@@ -943,6 +946,19 @@ func parseSiblingNFO(strm string) *meta.NFO {
 		return nil
 	}
 	return nfo
+}
+
+// streamsJSON serializes the full stream set of a resolved media info
+// for storage; empty when the source carried no stream payload.
+func streamsJSON(mi meta.MediaInfo) string {
+	if len(mi.Streams) == 0 {
+		return ""
+	}
+	raw, err := json.Marshal(mi.Streams)
+	if err != nil {
+		return ""
+	}
+	return string(raw)
 }
 
 // sidecarsOf returns the existing nfo/mediainfo sidecar paths for strms.

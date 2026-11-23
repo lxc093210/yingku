@@ -61,6 +61,12 @@ type MediaSource struct {
 	HDR             string
 	AudioSummary    string
 	MediaInfoSource string
+	// Full stream set as JSON (meta.StreamInfo list) plus source-level
+	// size/bitrate from the mediainfo sidecar; empty/zero when the
+	// sidecar did not provide them.
+	StreamsJSON string
+	SizeBytes   int64
+	Bitrate     int
 }
 
 // Subtitle is a sidecar subtitle file registered for an item.
@@ -297,10 +303,12 @@ func (t *Tx) ReplaceSources(itemID int64, sources []MediaSource) error {
 	for _, ms := range sources {
 		if _, err := t.tx.Exec(`
 			INSERT INTO media_sources(item_id, strm_path, target_url, width, height,
-				video_codec, hdr, audio_summary, mediainfo_source)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+				video_codec, hdr, audio_summary, mediainfo_source, streams_json,
+				size_bytes, bitrate)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 			itemID, ms.StrmPath, ms.TargetURL, ms.Width, ms.Height, ms.VideoCodec,
-			ms.HDR, ms.AudioSummary, ms.MediaInfoSource); err != nil {
+			ms.HDR, ms.AudioSummary, ms.MediaInfoSource, ms.StreamsJSON,
+			ms.SizeBytes, ms.Bitrate); err != nil {
 			return err
 		}
 	}
@@ -623,7 +631,7 @@ func (s *Store) Children(parentID int64) ([]*Item, error) {
 func (s *Store) SourcesOf(itemID int64) ([]MediaSource, error) {
 	rows, err := s.db.Query(`
 		SELECT id, item_id, strm_path, target_url, width, height, video_codec, hdr,
-			audio_summary, mediainfo_source
+			audio_summary, mediainfo_source, streams_json, size_bytes, bitrate
 		FROM media_sources WHERE item_id = ? ORDER BY id`, itemID)
 	if err != nil {
 		return nil, err
@@ -633,7 +641,8 @@ func (s *Store) SourcesOf(itemID int64) ([]MediaSource, error) {
 	for rows.Next() {
 		var ms MediaSource
 		if err := rows.Scan(&ms.ID, &ms.ItemID, &ms.StrmPath, &ms.TargetURL, &ms.Width,
-			&ms.Height, &ms.VideoCodec, &ms.HDR, &ms.AudioSummary, &ms.MediaInfoSource); err != nil {
+			&ms.Height, &ms.VideoCodec, &ms.HDR, &ms.AudioSummary, &ms.MediaInfoSource,
+			&ms.StreamsJSON, &ms.SizeBytes, &ms.Bitrate); err != nil {
 			return nil, err
 		}
 		out = append(out, ms)

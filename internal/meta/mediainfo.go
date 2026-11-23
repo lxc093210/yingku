@@ -20,6 +20,48 @@ type MediaInfo struct {
 	AudioSummary string
 	RuntimeMin   int
 	Source       string
+	// Full-fidelity payload from the sidecar: every stream with all
+	// its Emby fields, plus source-level size/bitrate/container.
+	// Clients (SenPlayer/Infuse) render their media-info panels from
+	// these; the summary fields above are only a fallback.
+	Streams   []StreamInfo
+	Size      int64
+	Bitrate   int
+	Container string
+}
+
+// StreamInfo is one stream of a media source, mirroring the Emby
+// MediaStream shape as written by the NanShare MediaInfo plugin.
+type StreamInfo struct {
+	Type             string  `json:"Type"`
+	Index            int     `json:"Index"`
+	Codec            string  `json:"Codec,omitempty"`
+	CodecTag         string  `json:"CodecTag,omitempty"`
+	Language         string  `json:"Language,omitempty"`
+	DisplayTitle     string  `json:"DisplayTitle,omitempty"`
+	Width            int     `json:"Width,omitempty"`
+	Height           int     `json:"Height,omitempty"`
+	BitRate          int     `json:"BitRate,omitempty"`
+	BitDepth         int     `json:"BitDepth,omitempty"`
+	Profile          string  `json:"Profile,omitempty"`
+	Level            float64 `json:"Level,omitempty"`
+	AverageFrameRate float64 `json:"AverageFrameRate,omitempty"`
+	RealFrameRate    float64 `json:"RealFrameRate,omitempty"`
+	AspectRatio      string  `json:"AspectRatio,omitempty"`
+	IsInterlaced     bool    `json:"IsInterlaced"`
+	IsDefault        bool    `json:"IsDefault"`
+	IsForced         bool    `json:"IsForced"`
+	IsExternal       bool    `json:"IsExternal"`
+	Channels         int     `json:"Channels,omitempty"`
+	ChannelLayout    string  `json:"ChannelLayout,omitempty"`
+	SampleRate       int     `json:"SampleRate,omitempty"`
+	ColorPrimaries   string  `json:"ColorPrimaries,omitempty"`
+	ColorSpace       string  `json:"ColorSpace,omitempty"`
+	ColorTransfer    string  `json:"ColorTransfer,omitempty"`
+	PixelFormat      string  `json:"PixelFormat,omitempty"`
+	RefFrames        int     `json:"RefFrames,omitempty"`
+	VideoRange       string  `json:"VideoRange,omitempty"`
+	ExtendedVideoType string `json:"ExtendedVideoType,omitempty"`
 }
 
 // MediaInfoProvider resolves media info for a .strm file. Phase 1 ships only
@@ -44,19 +86,11 @@ func SidecarPath(strmPath string) string {
 
 type sidecarFile []struct {
 	MediaSourceInfo struct {
-		RunTimeTicks int64 `json:"RunTimeTicks"`
-		MediaStreams []struct {
-			Type              string `json:"Type"`
-			Codec             string `json:"Codec"`
-			Width             int    `json:"Width"`
-			Height            int    `json:"Height"`
-			VideoRange        string `json:"VideoRange"`
-			ExtendedVideoType string `json:"ExtendedVideoType"`
-			Language          string `json:"Language"`
-			Channels          int    `json:"Channels"`
-			ChannelLayout     string `json:"ChannelLayout"`
-			DisplayTitle      string `json:"DisplayTitle"`
-		} `json:"MediaStreams"`
+		RunTimeTicks int64        `json:"RunTimeTicks"`
+		Size         int64        `json:"Size"`
+		Bitrate      int          `json:"Bitrate"`
+		Container    string       `json:"Container"`
+		MediaStreams []StreamInfo `json:"MediaStreams"`
 	} `json:"MediaSourceInfo"`
 }
 
@@ -83,6 +117,10 @@ func ParseSidecar(raw []byte) (MediaInfo, error) {
 	}
 	mi := MediaInfo{Source: "json"}
 	src := doc[0].MediaSourceInfo
+	mi.Streams = src.MediaStreams
+	mi.Size = src.Size
+	mi.Bitrate = src.Bitrate
+	mi.Container = src.Container
 	if src.RunTimeTicks > 0 {
 		mi.RuntimeMin = int((src.RunTimeTicks/10_000_000 + 30) / 60)
 	}

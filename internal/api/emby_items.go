@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"yingku/internal/meta"
 	"yingku/internal/store"
 )
 
@@ -483,13 +484,35 @@ func (s *Server) handleEmbyImage(w http.ResponseWriter, r *http.Request) {
 // ---- PlaybackInfo ----
 
 type embyMediaStreamDTO struct {
-	Type         string `json:"Type"`
-	Index        int    `json:"Index"`
-	Codec        string `json:"Codec,omitempty"`
-	Width        int    `json:"Width,omitempty"`
-	Height       int    `json:"Height,omitempty"`
-	Language     string `json:"Language,omitempty"`
-	DisplayTitle string `json:"DisplayTitle,omitempty"`
+	Type              string  `json:"Type"`
+	Index             int     `json:"Index"`
+	Codec             string  `json:"Codec,omitempty"`
+	CodecTag          string  `json:"CodecTag,omitempty"`
+	Width             int     `json:"Width,omitempty"`
+	Height            int     `json:"Height,omitempty"`
+	Language          string  `json:"Language,omitempty"`
+	DisplayTitle      string  `json:"DisplayTitle,omitempty"`
+	BitRate           int     `json:"BitRate,omitempty"`
+	BitDepth          int     `json:"BitDepth,omitempty"`
+	Profile           string  `json:"Profile,omitempty"`
+	Level             float64 `json:"Level,omitempty"`
+	AverageFrameRate  float64 `json:"AverageFrameRate,omitempty"`
+	RealFrameRate     float64 `json:"RealFrameRate,omitempty"`
+	AspectRatio       string  `json:"AspectRatio,omitempty"`
+	IsInterlaced      bool    `json:"IsInterlaced"`
+	IsDefault         bool    `json:"IsDefault"`
+	IsForced          bool    `json:"IsForced"`
+	IsExternal        bool    `json:"IsExternal"`
+	Channels          int     `json:"Channels,omitempty"`
+	ChannelLayout     string  `json:"ChannelLayout,omitempty"`
+	SampleRate        int     `json:"SampleRate,omitempty"`
+	ColorPrimaries    string  `json:"ColorPrimaries,omitempty"`
+	ColorSpace        string  `json:"ColorSpace,omitempty"`
+	ColorTransfer     string  `json:"ColorTransfer,omitempty"`
+	PixelFormat       string  `json:"PixelFormat,omitempty"`
+	RefFrames         int     `json:"RefFrames,omitempty"`
+	VideoRange        string  `json:"VideoRange,omitempty"`
+	ExtendedVideoType string  `json:"ExtendedVideoType,omitempty"`
 }
 
 type embyMediaSourceDTO struct {
@@ -503,6 +526,8 @@ type embyMediaSourceDTO struct {
 	SupportsDirectStream bool                 `json:"SupportsDirectStream"`
 	SupportsTranscoding  bool                 `json:"SupportsTranscoding"`
 	RunTimeTicks         int64                `json:"RunTimeTicks,omitempty"`
+	Size                 int64                `json:"Size,omitempty"`
+	Bitrate              int                  `json:"Bitrate,omitempty"`
 	MediaStreams         []embyMediaStreamDTO `json:"MediaStreams,omitempty"`
 }
 
@@ -517,6 +542,28 @@ type embyPlaybackInfoDTO struct {
 // ("truehd 7.1 (eng), aac 2.0" — the trailing "· N subs" note is not a
 // stream and is dropped).
 func mediaStreamsOf(src store.MediaSource) []embyMediaStreamDTO {
+	if src.StreamsJSON != "" {
+		var stored []meta.StreamInfo
+		if err := json.Unmarshal([]byte(src.StreamsJSON), &stored); err == nil && len(stored) > 0 {
+			out := make([]embyMediaStreamDTO, 0, len(stored))
+			for _, st := range stored {
+				out = append(out, embyMediaStreamDTO{
+					Type: st.Type, Index: st.Index, Codec: st.Codec, CodecTag: st.CodecTag,
+					Width: st.Width, Height: st.Height, Language: st.Language,
+					DisplayTitle: st.DisplayTitle, BitRate: st.BitRate, BitDepth: st.BitDepth,
+					Profile: st.Profile, Level: st.Level, AverageFrameRate: st.AverageFrameRate,
+					RealFrameRate: st.RealFrameRate, AspectRatio: st.AspectRatio,
+					IsInterlaced: st.IsInterlaced, IsDefault: st.IsDefault, IsForced: st.IsForced,
+					IsExternal: st.IsExternal, Channels: st.Channels, ChannelLayout: st.ChannelLayout,
+					SampleRate: st.SampleRate, ColorPrimaries: st.ColorPrimaries,
+					ColorSpace: st.ColorSpace, ColorTransfer: st.ColorTransfer,
+					PixelFormat: st.PixelFormat, RefFrames: st.RefFrames,
+					VideoRange: st.VideoRange, ExtendedVideoType: st.ExtendedVideoType,
+				})
+			}
+			return out
+		}
+	}
 	var out []embyMediaStreamDTO
 	idx := 0
 	if src.Width > 0 || src.Height > 0 || src.VideoCodec != "" {
@@ -642,6 +689,8 @@ func (s *Server) handleEmbyPlaybackInfo(w http.ResponseWriter, r *http.Request) 
 		SupportsDirectPlay:   true,
 		SupportsDirectStream: true,
 		SupportsTranscoding:  false,
+		Size:                 src.SizeBytes,
+		Bitrate:              src.Bitrate,
 		MediaStreams:         mediaStreamsOf(src),
 	}
 	if target.RuntimeMin > 0 {

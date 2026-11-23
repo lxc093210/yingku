@@ -56,6 +56,25 @@ func Open(path string) (*Store, error) {
 		db.Close()
 		return nil, fmt.Errorf("migrate library_paths: %w", err)
 	}
+	// Migration: media_sources gained the full stream payload
+	// (streams_json/size_bytes/bitrate) for rich client media info.
+	for _, col := range []struct{ name, ddl string }{
+		{"streams_json", `ALTER TABLE media_sources ADD COLUMN streams_json TEXT NOT NULL DEFAULT ''`},
+		{"size_bytes", `ALTER TABLE media_sources ADD COLUMN size_bytes INTEGER NOT NULL DEFAULT 0`},
+		{"bitrate", `ALTER TABLE media_sources ADD COLUMN bitrate INTEGER NOT NULL DEFAULT 0`},
+	} {
+		has, err := columnExists(db, "media_sources", col.name)
+		if err != nil {
+			db.Close()
+			return nil, fmt.Errorf("check media_sources.%s: %w", col.name, err)
+		}
+		if !has {
+			if _, err := db.Exec(col.ddl); err != nil {
+				db.Close()
+				return nil, fmt.Errorf("migrate media_sources.%s: %w", col.name, err)
+			}
+		}
+	}
 	// Migration: user_data gained last_played_at after the first release.
 	has, err := columnExists(db, "user_data", "last_played_at")
 	if err != nil {
@@ -239,7 +258,10 @@ CREATE TABLE IF NOT EXISTS media_sources (
   video_codec      TEXT NOT NULL DEFAULT '',
   hdr              TEXT NOT NULL DEFAULT '',
   audio_summary    TEXT NOT NULL DEFAULT '',
-  mediainfo_source TEXT NOT NULL DEFAULT 'none' -- json | filename | none (future: probe)
+  mediainfo_source TEXT NOT NULL DEFAULT 'none', -- json | filename | none (future: probe)
+  streams_json     TEXT NOT NULL DEFAULT '',
+  size_bytes       INTEGER NOT NULL DEFAULT 0,
+  bitrate          INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS idx_ms_item ON media_sources(item_id);
 
