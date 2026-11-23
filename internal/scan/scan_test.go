@@ -877,3 +877,55 @@ func TestScanMergesMovieVersions(t *testing.T) {
 		t.Errorf("sources after removal = %d, want 1", len(sources3))
 	}
 }
+
+func TestScanMergesTwoGroups(t *testing.T) {
+	// Two merged groups in one scan: the second group's store reads
+	// run after the first group's write. On the single-connection
+	// store this deadlocked when the writer transaction stayed open
+	// across groups (batch 24 regression).
+	st := openTemp(t)
+	base := t.TempDir()
+	mk := func(root, folder, file string) {
+		dir := filepath.Join(root, folder)
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, file), []byte("http://example.com/"+file), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	rootA := filepath.Join(base, "rootA")
+	rootB := filepath.Join(base, "rootB")
+	mk(rootA, "Film One (2001) {tmdbid-1111}", "Film.One.2001.1080p.strm")
+	mk(rootB, "Film One (2001) {tmdbid-1111}", "Film.One.2001.2160p.strm")
+	mk(rootA, "Film Two (2002) {tmdbid-2222}", "Film.Two.2002.1080p.strm")
+	mk(rootB, "Film Two (2002) {tmdbid-2222}", "Film.Two.2002.2160p.strm")
+	id, err := st.CreateLibrary("电影库", "movie", []string{rootA, rootB})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sc := New(st)
+	done := make(chan error, 1)
+	go func() { done <- sc.ScanLibraryByID(id) }()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(30 * time.Second):
+		t.Fatal("scan deadlocked across merged groups")
+	}
+	for _, tmdb := range []int64{1111, 2222} {
+		items, err := st.ItemsByTmdb(id, tmdb)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(items) != 1 {
+			t.Fatalf("tmdb %d: merged items = %d, want 1", tmdb, len(items))
+		}
+		sources, _ := st.SourcesOf(items[0].ID)
+		if len(sources) != 2 {
+			t.Errorf("tmdb %d: sources = %d, want 2", tmdb, len(sources))
+		}
+	}
+}

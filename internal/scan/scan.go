@@ -908,6 +908,13 @@ func (s *Scanner) flushMovieGroups(w *writer, index map[string]store.IndexEntry,
 		}); err != nil {
 			return err
 		}
+		// Commit after every group: the store runs on a single
+		// connection, and the next group's reads and user-data
+		// merge run outside this writer — they would wait forever
+		// on the connection this transaction is holding.
+		if err := w.flush(); err != nil {
+			return err
+		}
 	}
 	return nil
 }
