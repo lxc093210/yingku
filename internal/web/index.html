@@ -583,6 +583,8 @@
       <div class="crumb" id="crumb"></div>
       <div>
         <button class="btn small" id="upBtn">↑ 上级目录</button>
+        <button class="btn small" id="pickCurrentBtn">✓ 选当前文件夹</button>
+        <span class="hint">勾选框选同级文件夹；进入某个文件夹后点「选当前文件夹」选它本身。</span>
       </div>
       <div class="dirlist" id="dirList"></div>
       <div class="selchips" id="selChips"></div>
@@ -1783,10 +1785,18 @@ function openPicker() {
   pickerGo("");
 }
 $("#upBtn").addEventListener("click", () => { if (picker.parent) pickerGo(picker.parent); });
+$("#pickCurrentBtn").addEventListener("click", () => {
+  if (!picker.path || picker.path === "/") { toast("先进入要选的文件夹再点这里"); return; }
+  picker.selected.add(picker.path);
+  renderSelChips();
+  toast("已选当前文件夹");
+});
 $("#pickerOK").addEventListener("click", () => {
   const existing = new Set(formPaths());
-  picker.selected.forEach(p => { if (!existing.has(p)) addPathRow(p); });
+  let added = 0;
+  picker.selected.forEach(p => { if (!existing.has(p)) { addPathRow(p); added++; } });
   closeOverlay("pickerOverlay");
+  if (!added) toast("没有新增：未勾选新文件夹，或选的已在列表里");
 });
 
 /* ---------------- auth: session probe, login, bootstrap ---------------- */
