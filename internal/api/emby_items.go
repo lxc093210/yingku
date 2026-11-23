@@ -694,37 +694,90 @@ type authenticateByNameRequest struct {
 	Pw       string `json:"Pw"`
 }
 
+// embyUserDTOFull renders the full Emby UserDto shape. It mirrors a
+// real Emby server closely — notably ServerId, which clients like
+// SenPlayer cross-check against System/Info's Id while validating a
+// saved server; a thin DTO without it reads as an unreadable server
+// response even with HTTP 200.
+func (s *Server) embyUserDTOFull(id, name string, hasPassword, isAdmin bool, createdAt int64) map[string]any {
+	if createdAt <= 0 {
+		createdAt = time.Now().Unix()
+	}
+	created := time.Unix(createdAt, 0).UTC().Format("2006-01-02T15:04:05.0000000Z")
+	return map[string]any{
+		"Name":                      name,
+		"ServerId":                  s.ensureServerID(),
+		"Id":                        id,
+		"DateCreated":               created,
+		"HasPassword":               hasPassword,
+		"HasConfiguredPassword":     hasPassword,
+		"HasConfiguredEasyPassword": false,
+		"LastLoginDate":             created,
+		"LastActivityDate":          created,
+		"Configuration": map[string]any{
+			"AudioLanguagePreference":    "",
+			"DisplayMissingEpisodes":     false,
+			"EnableLocalPassword":        false,
+			"EnableNextEpisodeAutoPlay":  true,
+			"HidePlayedInLatest":         false,
+			"LatestItemsExcludes":        []any{},
+			"MyMediaExcludes":            []any{},
+			"OrderedViews":               []any{},
+			"PlayDefaultAudioTrack":      true,
+			"RememberAudioSelections":    true,
+			"RememberSubtitleSelections": true,
+			"SubtitleLanguagePreference": "",
+			"SubtitleMode":               "Default",
+		},
+		"Policy": map[string]any{
+			"IsAdministrator":                isAdmin,
+			"IsHidden":                       false,
+			"IsDisabled":                     false,
+			"EnableAllFolders":               true,
+			"EnableAllDevices":               true,
+			"EnableAllChannels":              true,
+			"EnableContentDeletion":          isAdmin,
+			"EnableContentDownloading":       true,
+			"EnableLiveTvAccess":             false,
+			"EnableLiveTvManagement":         false,
+			"EnableMediaPlayback":            true,
+			"EnableAudioPlaybackTranscoding": false,
+			"EnableVideoPlaybackTranscoding": false,
+			"EnablePlaybackRemuxing":         false,
+			"EnableSyncTranscoding":          false,
+			"AllowCameraUpload":              false,
+			"AllowSharingPersonalItems":      false,
+			"BlockUnratedItems":              []any{},
+			"BlockedTags":                    []any{},
+			"AccessSchedules":                []any{},
+			"InvalidLoginAttemptCount":       0,
+			"LoginAttemptsBeforeLockout":     0,
+			"MaxActiveSessions":              0,
+			"RemoteClientBitrateLimit":       0,
+			"AuthenticationProviderId":       "Emby.Server.Implementations.Library.DefaultAuthenticationProvider",
+			"PasswordResetProviderId":        "Emby.Server.Implementations.Library.DefaultPasswordResetProvider",
+			"SyncPlayAccess":                 "CreateAndJoinGroups",
+		},
+	}
+}
+
 // embyUserDTO is the synthetic fallback user, served when the
 // requested id names no real account (and for the user list while no
 // accounts exist at all). Nan's helper probes arbitrary user ids when
 // registering a server, so the probe keeps working exactly as it did
 // before real accounts landed (batch 10 behavior).
 func (s *Server) embyUserDTO() map[string]any {
-	return map[string]any{
-		"Id":                    s.ensureServerID(),
-		"Name":                  "yingku",
-		"HasPassword":           false,
-		"HasConfiguredPassword": false,
-		"Configuration":         map[string]any{},
-		"Policy":                map[string]any{"IsAdministrator": true, "EnableAllFolders": true},
-	}
+	return s.embyUserDTOFull(s.ensureServerID(), "yingku", false, true, 0)
 }
 
 // embyUserDTOFor renders a real account as an Emby user DTO.
-func embyUserDTOFor(u *store.User) map[string]any {
-	return map[string]any{
-		"Id":                    u.ID,
-		"Name":                  u.Name,
-		"HasPassword":           true,
-		"HasConfiguredPassword": true,
-		"Configuration":         map[string]any{},
-		"Policy":                map[string]any{"IsAdministrator": u.IsAdmin, "EnableAllFolders": true},
-	}
+func (s *Server) embyUserDTOFor(u *store.User) map[string]any {
+	return s.embyUserDTOFull(u.ID, u.Name, true, u.IsAdmin, u.CreatedAt)
 }
 
 func (s *Server) handleEmbyUser(w http.ResponseWriter, r *http.Request) {
 	if u, err := s.st.GetUserByID(r.PathValue("userId")); err == nil && u != nil {
-		writeJSON(w, http.StatusOK, embyUserDTOFor(u))
+		writeJSON(w, http.StatusOK, s.embyUserDTOFor(u))
 		return
 	}
 	writeJSON(w, http.StatusOK, s.embyUserDTO())
@@ -735,7 +788,7 @@ func (s *Server) handleEmbyUsers(w http.ResponseWriter, r *http.Request) {
 	if err == nil && len(users) > 0 {
 		out := make([]any, 0, len(users))
 		for _, u := range users {
-			out = append(out, embyUserDTOFor(u))
+			out = append(out, s.embyUserDTOFor(u))
 		}
 		writeJSON(w, http.StatusOK, out)
 		return
@@ -769,7 +822,7 @@ func (s *Server) handleAuthenticateByName(w http.ResponseWriter, r *http.Request
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"User":        embyUserDTOFor(u),
+		"User":        s.embyUserDTOFor(u),
 		"AccessToken": token,
 		"SessionInfo": map[string]any{
 			"Id":     "yk-session",

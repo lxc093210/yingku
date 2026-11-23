@@ -18,12 +18,14 @@ import (
 
 // systemInfoDTO mirrors Emby's SystemInfo shape (PascalCase fields).
 type systemInfoDTO struct {
-	ServerName             string `json:"ServerName"`
-	ProductName            string `json:"ProductName"`
-	Version                string `json:"Version"`
-	Id                     string `json:"Id"`
-	OperatingSystem        string `json:"OperatingSystem"`
-	StartupWizardCompleted bool   `json:"StartupWizardCompleted"`
+	LocalAddresses         []string `json:"LocalAddresses"`
+	RemoteAddresses        []string `json:"RemoteAddresses"`
+	ServerName             string   `json:"ServerName"`
+	ProductName            string   `json:"ProductName"`
+	Version                string   `json:"Version"`
+	Id                     string   `json:"Id"`
+	OperatingSystem        string   `json:"OperatingSystem"`
+	StartupWizardCompleted bool     `json:"StartupWizardCompleted"`
 }
 
 func embyOSName() string {
@@ -41,6 +43,8 @@ func embyOSName() string {
 
 func (s *Server) handleSystemInfo(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, systemInfoDTO{
+		LocalAddresses:         []string{},
+		RemoteAddresses:        []string{},
 		ServerName:             "影库 Yingku",
 		ProductName:            "Yingku",
 		Version:                serverVersion,
