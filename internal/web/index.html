@@ -310,8 +310,8 @@
     border:1px solid var(--line);color:var(--text);border-radius:8px;padding:9px 12px;
     font-size:14px;outline:none}
   form.libform input:focus,form.libform select:focus{border-color:#4a4e57}
-  .pathrow{display:flex;gap:8px;margin-bottom:8px}
-  .pathrow input{flex:1}
+  .pathrow{display:flex;gap:8px;margin-bottom:8px;align-items:flex-start}
+  .pathrow textarea{flex:1;resize:none;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12px;line-height:1.45;word-break:break-all}
   .scanline{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
   .scanstat{font-size:13px;color:var(--muted)}
 
@@ -500,7 +500,7 @@
           <option value="series">电视剧</option>
           <option value="mixed">混合</option>
         </select>
-        <label>根文件夹（可多个）</label>
+        <label id="fPathsLabel">根文件夹（可多个）</label>
         <div id="fPaths"></div>
         <button type="button" class="btn small" id="addPathBtn">＋ 添加路径</button>
         <div class="modalfoot">
@@ -1544,16 +1544,23 @@ async function renderLibList() {
 function addPathRow(value) {
   const row = document.createElement("div");
   row.className = "pathrow";
-  row.innerHTML = '<input type="text" placeholder="/vol1/…/已整理/电影/华语电影" value="' + esc(value || "") + '">' +
+  row.innerHTML = '<textarea rows="2" spellcheck="false" placeholder="点「浏览…」选择文件夹，或直接粘贴完整路径"></textarea>' +
     '<button type="button" class="btn small browse">浏览…</button>' +
     '<button type="button" class="btn small danger del">✕</button>';
+  row.querySelector("textarea").value = value || "";
   row.querySelector(".browse").addEventListener("click", () => openPicker());
-  row.querySelector(".del").addEventListener("click", () => row.remove());
+  row.querySelector(".del").addEventListener("click", () => { row.remove(); syncPathsLabel(); });
   $("#fPaths").appendChild(row);
+  syncPathsLabel();
 }
 function formPaths() {
-  return Array.from(document.querySelectorAll("#fPaths .pathrow input"))
+  return Array.from(document.querySelectorAll("#fPaths .pathrow textarea"))
     .map(i => i.value.trim()).filter(Boolean);
+}
+function syncPathsLabel() {
+  const n = document.querySelectorAll("#fPaths .pathrow").length;
+  const el = $("#fPathsLabel");
+  if (el) el.textContent = "根文件夹（共 " + n + " 个）";
 }
 function openLibForm(lib) {
   editingId = lib ? lib.Id : null;

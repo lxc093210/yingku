@@ -205,6 +205,57 @@ func (s *Store) LibraryArtworkItem(libraryID int64) (int64, error) {
 	return 0, nil
 }
 
+// LibraryArtworkItems picks up to limit top-level items whose
+// backdrops best represent a library on client home screens: first
+// the trusted-rating band (6.5-9.9, high-resolution backdrops first,
+// best rated first — the same discipline as the home hero), then the
+// newest remaining items with a backdrop so young libraries still
+// fill a cover.
+func (s *Store) LibraryArtworkItems(libraryID int64, limit int) ([]*Item, error) {
+	if limit <= 0 {
+		limit = 4
+	}
+	seen := map[int64]bool{}
+	var out []*Item
+	pick := func(extra string, args ...any) error {
+		q := `SELECT ` + itemCols + ` FROM items
+			WHERE library_id = ? AND parent_id IS NULL
+			  AND EXISTS(SELECT 1 FROM images WHERE item_id = items.id AND kind = 'backdrop')
+			` + extra + ` LIMIT ?`
+		rows, err := s.db.Query(q, append(append([]any{libraryID}, args...), limit)...)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			it, err := scanItem(rows)
+			if err != nil {
+				return err
+			}
+			if !seen[it.ID] {
+				seen[it.ID] = true
+				out = append(out, it)
+			}
+		}
+		return rows.Err()
+	}
+	if err := pick(`AND rating BETWEEN 6.5 AND 9.9
+		ORDER BY (CASE WHEN COALESCE((SELECT width FROM images WHERE item_id = items.id AND kind = 'backdrop'), 0) >= 1920 THEN 0
+		               WHEN COALESCE((SELECT width FROM images WHERE item_id = items.id AND kind = 'backdrop'), 0) >= 1280 THEN 1 ELSE 2 END),
+		rating DESC, date_added DESC`); err != nil {
+		return nil, err
+	}
+	if len(out) < limit {
+		if err := pick(`ORDER BY date_added DESC, id DESC`); err != nil {
+			return nil, err
+		}
+	}
+	if len(out) > limit {
+		out = out[:limit]
+	}
+	return out, nil
+}
+
 // ChildCounts returns the direct-child count per parent id, for the
 // parents that have at least one child.
 func (s *Store) ChildCounts(parentIDs []int64) (map[int64]int, error) {
