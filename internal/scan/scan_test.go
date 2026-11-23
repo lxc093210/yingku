@@ -1,6 +1,9 @@
 package scan
 
 import (
+	"image"
+	"image/jpeg"
+	"image/png"
 	"os"
 	"path/filepath"
 	"testing"
@@ -260,6 +263,83 @@ func TestScanLongestPrefixOwnership(t *testing.T) {
 	}
 	if b, _ := st.GetItemByPath(filmB); b == nil {
 		t.Errorf("filmB vanished after outer-only scan")
+	}
+}
+
+// writeJPEG renders a solid-color JPEG of the given pixel size.
+func writeJPEG(t *testing.T, path string, w, h int) {
+	t.Helper()
+	img := image.NewRGBA(image.Rect(0, 0, w, h))
+	f, err := os.Create(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	if err := jpeg.Encode(f, img, &jpeg.Options{Quality: 90}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// writePNG renders a solid-color PNG of the given pixel size.
+func writePNG(t *testing.T, path string, w, h int) {
+	t.Helper()
+	img := image.NewRGBA(image.Rect(0, 0, w, h))
+	f, err := os.Create(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	if err := png.Encode(f, img); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestImageDims(t *testing.T) {
+	dir := t.TempDir()
+	jpg := filepath.Join(dir, "a.jpg")
+	writeJPEG(t, jpg, 64, 48)
+	if w, h, ok := imageDims(jpg); !ok || w != 64 || h != 48 {
+		t.Errorf("jpeg dims = %dx%d ok=%v, want 64x48", w, h, ok)
+	}
+	pngPath := filepath.Join(dir, "a.png")
+	writePNG(t, pngPath, 30, 17)
+	if w, h, ok := imageDims(pngPath); !ok || w != 30 || h != 17 {
+		t.Errorf("png dims = %dx%d ok=%v, want 30x17", w, h, ok)
+	}
+	bogus := filepath.Join(dir, "b.jpg")
+	if err := os.WriteFile(bogus, []byte("not an image at all"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, ok := imageDims(bogus); ok {
+		t.Errorf("bogus file reported dims")
+	}
+	// Unreadable dimensions fall back to byte size (non-zero here).
+	if imageScore(bogus) != int64(len("not an image at all")) {
+		t.Errorf("fallback score = %d", imageScore(bogus))
+	}
+}
+
+// TestFolderImagesPrefersLargest mirrors the NAS finding: a small
+// backdrop.jpg next to a full-size background.jpg must lose.
+func TestFolderImagesPrefersLargest(t *testing.T) {
+	dir := t.TempDir()
+	backdrop := filepath.Join(dir, "backdrop.jpg")
+	background := filepath.Join(dir, "background.jpg")
+	fanart := filepath.Join(dir, "fanart.jpg")
+	poster := filepath.Join(dir, "poster.jpg")
+	cover := filepath.Join(dir, "cover.png")
+	writeJPEG(t, backdrop, 8, 5)
+	writeJPEG(t, background, 128, 72)
+	writeJPEG(t, fanart, 16, 9)
+	writeJPEG(t, poster, 10, 15)
+	writePNG(t, cover, 40, 60)
+
+	imgs := folderImages([]string{backdrop, background, fanart, poster, cover})
+	if imgs["backdrop"] != background {
+		t.Errorf("backdrop = %q, want the larger background.jpg", imgs["backdrop"])
+	}
+	if imgs["poster"] != cover {
+		t.Errorf("poster = %q, want the larger cover.png", imgs["poster"])
 	}
 }
 

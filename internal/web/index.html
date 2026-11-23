@@ -96,11 +96,13 @@
   .pwrap{position:relative;width:100%;aspect-ratio:2/3;border-radius:10px;overflow:hidden;
     background:var(--panel);transition:transform .18s,box-shadow .18s}
   .card:hover .pwrap{transform:scale(1.045);box-shadow:0 12px 30px rgba(0,0,0,.55);z-index:2}
-  .pwrap img{width:100%;height:100%;object-fit:cover;display:block}
-  .pwrap .fb{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
+  .pwrap img{position:absolute;inset:0;z-index:1;width:100%;height:100%;object-fit:cover;display:block}
+  .pwrap .fb{position:absolute;inset:0;z-index:0;display:flex;align-items:center;justify-content:center;
     padding:14px;text-align:center;font-size:16.5px;font-weight:700;line-height:1.5;color:rgba(255,255,255,.92)}
-  .pwrap .veil{position:absolute;left:0;right:0;bottom:0;padding:22px 9px 8px;font-size:12px;
+  .pwrap .veil{position:absolute;left:0;right:0;bottom:0;z-index:2;padding:22px 9px 8px;font-size:12px;
     background:linear-gradient(0deg,rgba(0,0,0,.82),transparent);opacity:0;transition:opacity .18s}
+  .pwrap .pbar{position:absolute;left:0;right:0;bottom:0;z-index:3;height:4px;background:rgba(255,255,255,.22)}
+  .pwrap .pbar i{display:block;height:100%;background:var(--red)}
   .card:hover .veil{opacity:1}
   .veil .r{color:#ffb3b8;font-weight:700}
   .card .nm{margin-top:8px;font-size:13.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
@@ -150,6 +152,26 @@
   .ep .ti .t{font-size:14.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .ep .ti .s{font-size:12px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .ep .rt{font-size:12.5px;color:var(--muted);flex:none}
+  .castt{font-size:16.5px;font-weight:700;margin:24px 0 12px}
+  .cast{display:flex;gap:16px;overflow-x:auto;padding-bottom:8px;scrollbar-width:none}
+  .cast::-webkit-scrollbar{display:none}
+  .person{flex:none;width:74px;text-align:center}
+  .person .av{width:58px;height:58px;border-radius:50%;margin:0 auto 6px;overflow:hidden;
+    background:var(--panel2);border:1px solid var(--line);display:flex;align-items:center;justify-content:center;
+    font-size:21px;font-weight:700;color:#cfd2d6}
+  .person .av{position:relative}
+  .person .av img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;display:block}
+  .person .pn{font-size:12.5px;line-height:1.35;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .person .pr{font-size:11.5px;color:var(--muted);line-height:1.35;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .btn.faved{background:var(--red);border-color:var(--red);color:#fff}
+
+  /* ---------- player ---------- */
+  .player{position:fixed;inset:0;z-index:130;background:#000;display:none;flex-direction:column}
+  .player.open{display:flex}
+  .player .phead{display:flex;align-items:center;gap:14px;padding:12px 18px;color:var(--text)}
+  .player .phead .t{font-size:16px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .player .phead .x{margin-left:auto;flex:none}
+  .player video{flex:1;width:100%;min-height:0;background:#000}
 
   /* ---------- settings ---------- */
   .setbody{padding:24px 28px 30px;position:relative}
@@ -310,6 +332,14 @@
         <button class="btn" id="scanAllBtn">全库扫描</button>
         <span class="scanstat" id="scanStat">—</span>
       </div>
+
+      <h3>TMDB</h3>
+      <div class="hint" style="margin-bottom:10px">填写 TMDB API Key 后，本地 NFO 没有演员头像的条目会从 TMDB 补齐演职人员。Key 只保存在本机数据库，页面不会回显；保存空值将清除已存的 Key。</div>
+      <div class="pathrow">
+        <input type="password" id="tmdbKey" placeholder="未设置" autocomplete="off"
+          style="flex:1;background:var(--panel);border:1px solid var(--line);color:var(--text);border-radius:8px;padding:9px 12px;font-size:14px;outline:none">
+        <button type="button" class="btn small" id="tmdbSave">保存</button>
+      </div>
     </div>
   </div>
 </div>
@@ -346,6 +376,15 @@
       </div>
     </div>
   </div>
+</div>
+
+<!-- web player -->
+<div class="player" id="playerOverlay">
+  <div class="phead">
+    <span class="t" id="playerTitle"></span>
+    <button class="iconbtn x" id="playerClose" title="关闭">✕</button>
+  </div>
+  <video id="playerVideo" controls autoplay playsinline></video>
 </div>
 
 <div id="toast"></div>
@@ -408,6 +447,28 @@ function makeCard(it) {
   d.addEventListener("click", () => openDetail(it.Id));
   return d;
 }
+function makeContinueCard(it) {
+  const d = document.createElement("div");
+  d.className = "card";
+  const hue = hueOf(it.Name || "");
+  const pct = (it.PlaybackPositionTicks && it.RunTimeTicks)
+    ? Math.min(100, Math.max(1, Math.round(it.PlaybackPositionTicks / it.RunTimeTicks * 100))) : 0;
+  let inner = '<div class="pwrap">';
+  if (it.HasPoster) {
+    inner += '<img loading="lazy" src="/api/items/' + it.Id + '/image/poster" alt="" onerror="this.remove()">';
+  } else if (it.HasBackdrop) {
+    inner += '<img loading="lazy" src="/api/items/' + it.Id + '/image/backdrop" alt="" onerror="this.remove()">';
+  }
+  inner += '<div class="fb" style="background:linear-gradient(155deg,hsl(' + hue + ',42%,30%),hsl(' + ((hue + 50) % 360) + ',48%,13%))">' + esc(it.Name) + "</div>";
+  inner += '<div class="veil">' + esc(it.Name) + "</div>";
+  if (pct > 0) inner += '<div class="pbar"><i style="width:' + pct + '%"></i></div>';
+  inner += "</div>";
+  inner += '<div class="nm">' + esc(it.SeriesName || it.Name) + '</div><div class="yr">' +
+    (it.SeriesName ? esc(it.Name) + " · " : "") + (pct ? "看到 " + pct + "%" : "") + "</div>";
+  d.innerHTML = inner;
+  d.addEventListener("click", () => openPlayer(it.Id));
+  return d;
+}
 
 /* ---------------- navigation / views ---------------- */
 let LIBS = [];
@@ -450,8 +511,12 @@ function renderHero() {
   $("#heroOrig").textContent = it.OriginalTitle || "";
   $("#heroMeta").innerHTML = metaLine(it);
   $("#heroOv").textContent = it.Overview || "";
-  $("#heroPlay").onclick = () => toast("播放功能将在二期上线，届时由 Nan 解析直链播放");
-  $("#heroFav").onclick = () => toast("收藏功能即将上线");
+  const hf = $("#heroFav");
+  hf.dataset.fav = "";
+  hf.textContent = "＋ 收藏";
+  hf.classList.remove("faved");
+  $("#heroPlay").onclick = () => openPlayer(it.Id);
+  hf.onclick = () => toggleFavorite(it.Id, hf);
   $("#heroInfo").onclick = () => openDetail(it.Id);
   const dots = $("#heroDots");
   dots.innerHTML = "";
@@ -480,6 +545,21 @@ async function loadHome() {
     const rows = $("#rows");
     rows.innerHTML = "";
     let any = heroes.length > 0;
+    const cont = home.ContinueWatching || [];
+    if (cont.length) {
+      any = true;
+      const sec = document.createElement("div");
+      sec.className = "row";
+      const head = document.createElement("div");
+      head.className = "rowhead";
+      head.innerHTML = "<h2>继续观看</h2>";
+      const rail = document.createElement("div");
+      rail.className = "rail";
+      cont.forEach(it => rail.appendChild(makeContinueCard(it)));
+      sec.appendChild(head);
+      sec.appendChild(rail);
+      rows.appendChild(sec);
+    }
     for (const lib of LIBS) {
       try {
         const page = await api("/api/libraries/" + lib.Id + "/items?sort=rating&limit=18");
@@ -592,6 +672,16 @@ async function openDetail(id) {
     if ((d.Genres || []).length) {
       h += '<div class="chips">' + d.Genres.map(g => '<span class="chip">' + esc(g) + "</span>").join("") + "</div>";
     }
+    if ((d.People || []).length) {
+      h += '<div class="castt">演职人员</div><div class="cast">';
+      d.People.forEach(p => {
+        h += '<div class="person"><div class="av"><span>' + esc((p.Name || "?").slice(0, 1)) + "</span>" +
+          (p.ImageUrl ? '<img loading="lazy" src="' + esc(p.ImageUrl) + '" alt="" onerror="this.remove()">' : "") +
+          '</div><div class="pn">' + esc(p.Name) + "</div>" +
+          (p.Role ? '<div class="pr">' + esc(p.Role) + "</div>" : "") + "</div>";
+      });
+      h += "</div>";
+    }
     (d.Seasons || []).forEach(sn => {
       h += '<div class="seasont">第 ' + (sn.IndexNumber || "") + ' 季</div><div class="eplist">';
       (sn.Episodes || []).forEach(ep => {
@@ -605,15 +695,103 @@ async function openDetail(id) {
     });
     h += "</div>";
     c.innerHTML = h;
-    $("#dPlay").addEventListener("click", () => toast("播放功能将在二期上线，届时由 Nan 解析直链播放"));
-    $("#dFav").addEventListener("click", () => toast("收藏功能即将上线"));
+    $("#dPlay").addEventListener("click", () => openPlayer(d.Id));
+    const dFav = $("#dFav");
+    paintFavBtn(dFav, !!(d.UserData && d.UserData.Favorite));
+    dFav.addEventListener("click", () => toggleFavorite(d.Id, dFav));
     c.querySelectorAll(".ep").forEach(row =>
-      row.addEventListener("click", () => toast("播放功能将在二期上线，届时由 Nan 解析直链播放")));
+      row.addEventListener("click", () => openPlayer(parseInt(row.dataset.ep, 10))));
     openOverlay("detailOverlay");
   } catch (e) {
     toast("打开详情失败：" + e.message);
   }
 }
+
+/* ---------------- favorites ---------------- */
+function paintFavBtn(btn, fav) {
+  btn.dataset.fav = fav ? "1" : "0";
+  btn.textContent = fav ? "★ 已收藏" : "＋ 收藏";
+  btn.classList.toggle("faved", fav);
+}
+async function toggleFavorite(id, btn) {
+  try {
+    let cur;
+    if (btn && btn.dataset.fav) cur = btn.dataset.fav === "1";
+    else {
+      const d = await api("/api/items/" + id);
+      cur = !!(d.UserData && d.UserData.Favorite);
+    }
+    const next = !cur;
+    await api("/api/items/" + id + "/favorite", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ favorite: next })
+    });
+    if (btn) paintFavBtn(btn, next);
+    toast(next ? "已收藏" : "已取消收藏");
+  } catch (e) {
+    toast("收藏失败：" + e.message);
+  }
+}
+
+/* ---------------- web player ---------------- */
+const player = { id: null, lastReport: 0 };
+async function openPlayer(id) {
+  try {
+    const info = await api("/api/items/" + id + "/play-info");
+    player.id = info.ItemId;
+    player.lastReport = 0;
+    $("#playerTitle").textContent = (info.SeriesName ? info.SeriesName + " · " : "") + (info.Name || "");
+    const v = $("#playerVideo");
+    v.src = "/api/items/" + info.ItemId + "/stream";
+    if (info.PositionTicks > 0) {
+      const seek = () => {
+        try { v.currentTime = info.PositionTicks / 1e7; } catch (e) {}
+        v.removeEventListener("loadedmetadata", seek);
+      };
+      v.addEventListener("loadedmetadata", seek);
+    }
+    $("#playerOverlay").classList.add("open");
+    v.play().catch(() => {});
+  } catch (e) {
+    toast("无法播放：" + e.message);
+  }
+}
+function postProgress(positionSeconds, durationSeconds) {
+  if (player.id == null) return;
+  fetch("/api/items/" + player.id + "/progress", {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ positionSeconds: positionSeconds || 0, durationSeconds: durationSeconds || 0 }),
+    keepalive: true
+  }).catch(() => {});
+}
+function reportProgress(force) {
+  const v = $("#playerVideo");
+  if (player.id == null || !v.duration) return;
+  const now = Date.now();
+  if (!force && now - player.lastReport < 10000) return;
+  player.lastReport = now;
+  postProgress(v.currentTime, v.duration);
+}
+function closePlayer() {
+  if (player.id == null) { $("#playerOverlay").classList.remove("open"); return; }
+  reportProgress(true);
+  const id = player.id;
+  player.id = null; // first, so the pause handler below stays a no-op
+  const v = $("#playerVideo");
+  v.pause();
+  v.removeAttribute("src");
+  v.load();
+  $("#playerOverlay").classList.remove("open");
+  if (id != null) loadHome();
+}
+$("#playerClose").addEventListener("click", closePlayer);
+$("#playerVideo").addEventListener("timeupdate", () => reportProgress(false));
+$("#playerVideo").addEventListener("pause", () => reportProgress(false));
+$("#playerVideo").addEventListener("ended", () => {
+  const v = $("#playerVideo");
+  if (player.id != null && v.duration) postProgress(v.duration, v.duration);
+  player.lastReport = Date.now();
+});
 
 /* ---------------- overlays ---------------- */
 function openOverlay(id) { $("#" + id).classList.add("open"); }
@@ -623,7 +801,10 @@ document.querySelectorAll("[data-close]").forEach(b =>
 document.querySelectorAll(".overlay").forEach(ov =>
   ov.addEventListener("click", e => { if (e.target === ov) ov.classList.remove("open"); }));
 document.addEventListener("keydown", e => {
-  if (e.key === "Escape") document.querySelectorAll(".overlay.open").forEach(ov => ov.classList.remove("open"));
+  if (e.key === "Escape") {
+    if ($("#playerOverlay").classList.contains("open")) closePlayer();
+    document.querySelectorAll(".overlay.open").forEach(ov => ov.classList.remove("open"));
+  }
 });
 let confirmResolve = null;
 function askConfirm(text) {
@@ -786,7 +967,30 @@ $("#gear").addEventListener("click", async () => {
   closeLibForm();
   await renderLibList();
   refreshStatsLine();
+  refreshTMDBSetting();
   try { $("#scanStat").textContent = fmtScanStatus(await api("/api/scan/status")); } catch (e) {}
+});
+
+/* ---------------- settings: TMDB ---------------- */
+async function refreshTMDBSetting() {
+  try {
+    const s = await api("/api/settings");
+    const input = $("#tmdbKey");
+    input.value = "";
+    input.placeholder = s.tmdbKeySet ? "已设置（输入新值可覆盖）" : "未设置";
+  } catch (e) { /* keep placeholder */ }
+}
+$("#tmdbSave").addEventListener("click", async () => {
+  try {
+    const s = await api("/api/settings", {
+      method: "PUT", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ tmdbApiKey: $("#tmdbKey").value.trim() })
+    });
+    toast(s.tmdbKeySet ? "TMDB Key 已保存" : "TMDB Key 已清除");
+    refreshTMDBSetting();
+  } catch (e) {
+    toast("保存 TMDB Key 失败：" + e.message);
+  }
 });
 
 /* ---------------- folder picker (multi-select) ---------------- */

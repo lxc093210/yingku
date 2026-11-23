@@ -34,7 +34,19 @@ type NFO struct {
 	Season    int      `xml:"season"`
 	SeasonNum int      `xml:"seasonnumber"`
 	Episode   int      `xml:"episode"`
+	Actors    []Actor  `xml:"actor"`
 }
+
+// Actor is one <actor> entry of an NFO (cast member).
+type Actor struct {
+	Name  string `xml:"name"`
+	Role  string `xml:"role"`
+	Type  string `xml:"type"`
+	Thumb string `xml:"thumb"`
+}
+
+// MaxActors caps how many cast entries are kept per item.
+const MaxActors = 30
 
 // Date returns the best available date string (premiered > releasedate > aired).
 func (n *NFO) Date() string {
@@ -83,6 +95,22 @@ func ParseNFO(raw []byte) (*NFO, error) {
 	if err := xml.Unmarshal(raw, &n); err != nil {
 		return nil, err
 	}
+	// Normalize the cast list: trimmed, nameless entries dropped, capped.
+	actors := n.Actors[:0]
+	for _, a := range n.Actors {
+		a.Name = strings.TrimSpace(a.Name)
+		if a.Name == "" {
+			continue
+		}
+		a.Role = strings.TrimSpace(a.Role)
+		a.Type = strings.TrimSpace(a.Type)
+		a.Thumb = strings.TrimSpace(a.Thumb)
+		actors = append(actors, a)
+		if len(actors) >= MaxActors {
+			break
+		}
+	}
+	n.Actors = actors
 	n.Title = strings.TrimSpace(n.Title)
 	n.OriginalTitle = strings.TrimSpace(n.OriginalTitle)
 	if strings.TrimSpace(n.Plot) == "" {

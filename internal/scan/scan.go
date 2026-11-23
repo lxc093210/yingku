@@ -7,9 +7,12 @@
 package scan
 
 import (
+	"bytes"
 	"crypto/sha1"
+	"encoding/binary"
 	"encoding/hex"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -512,7 +515,27 @@ type pendingItem struct {
 	sources []store.MediaSource
 	images  map[string]string
 	subs    []store.Subtitle
+	people  []store.Person // nil = leave existing people untouched
 	countEp bool
+}
+
+// actorsToPeople converts NFO cast entries to store rows (always non-nil,
+// so a re-scan with a cast-less NFO clears stale people).
+func actorsToPeople(nfo *meta.NFO) []store.Person {
+	out := []store.Person{}
+	if nfo == nil {
+		return out
+	}
+	for i, a := range nfo.Actors {
+		kind := a.Type
+		if kind == "" {
+			kind = "Actor"
+		}
+		out = append(out, store.Person{
+			Name: a.Name, Role: a.Role, Kind: kind, Thumb: a.Thumb, Ord: i,
+		})
+	}
+	return out
 }
 
 func (s *Scanner) processFolder(w *writer, index map[string]store.IndexEntry, seen map[string]struct{}, libID int64, kind string, ctx *folderCtx, now int64) error {
@@ -545,6 +568,11 @@ func (s *Scanner) writeOne(w *writer, index map[string]store.IndexEntry, seen ma
 	}
 	if p.subs != nil {
 		if err := w.tx.ReplaceSubtitles(id, p.subs); err != nil {
+			return 0, err
+		}
+	}
+	if p.people != nil {
+		if err := w.tx.ReplacePeople(id, p.people); err != nil {
 			return 0, err
 		}
 	}
@@ -582,7 +610,8 @@ func (s *Scanner) processMovieFolder(w *writer, index map[string]store.IndexEntr
 		SortTitle: fi.Title, Fingerprint: fp, CreatedAt: now, UpdatedAt: now,
 	}
 	var firstMI meta.MediaInfo
-	if nfo := parseSiblingNFO(strms[0]); nfo != nil {
+	nfo := parseSiblingNFO(strms[0])
+	if nfo != nil {
 		applyNFO(it, nfo)
 	}
 	// Sources for every strm in the folder.
@@ -605,6 +634,7 @@ func (s *Scanner) processMovieFolder(w *writer, index map[string]store.IndexEntr
 		item: it, sources: sources,
 		images: folderImages(ctx.files),
 		subs:   matchSubtitles(ctx.files, strms),
+		people: actorsToPeople(nfo),
 	})
 	return err
 }
@@ -637,13 +667,19 @@ func (s *Scanner) processSeriesFolder(w *writer, index map[string]store.IndexEnt
 		s.skip(seen, ctx.itemDir)
 		seriesID = ex.ID
 	} else {
+		var seriesPeople []store.Person
 		if tvNFO != "" {
 			if nfo, err := meta.ParseNFOFile(tvNFO); err == nil {
 				applyNFO(series, nfo)
+				seriesPeople = actorsToPeople(nfo)
 			}
+		}
+		if seriesPeople == nil {
+			seriesPeople = []store.Person{}
 		}
 		id, err := s.writeOne(w, index, seen, pendingItem{
 			item: series, images: folderImages(ctx.files), subs: []store.Subtitle{},
+			people: seriesPeople,
 		})
 		if err != nil {
 			return err
@@ -755,7 +791,8 @@ func (s *Scanner) processEpisode(w *writer, index map[string]store.IndexEntry, s
 		CreatedAt: now, UpdatedAt: now,
 	}
 	sn, en := seasonNum, epFromName
-	if nfo := parseSiblingNFO(strm); nfo != nil {
+	epNFO := parseSiblingNFO(strm)
+	if nfo := epNFO; nfo != nil {
 		if nfo.Title != "" {
 			ep.Title = nfo.Title
 		}
@@ -789,7 +826,8 @@ func (s *Scanner) processEpisode(w *writer, index map[string]store.IndexEntry, s
 			Width: mi.Width, Height: mi.Height, VideoCodec: mi.VideoCodec,
 			HDR: mi.HDR, AudioSummary: mi.AudioSummary, MediaInfoSource: mi.Source,
 		}},
-		subs: matchSubtitles(siblings, []string{strm}),
+		subs:   matchSubtitles(siblings, []string{strm}),
+		people: actorsToPeople(epNFO),
 	})
 	return err
 }
@@ -901,22 +939,103 @@ func findNamed(files []string, name string) string {
 	return ""
 }
 
-// folderImages maps poster/backdrop files in an item folder.
+var posterCandidates = []string{"poster.jpg", "poster.png", "folder.jpg", "folder.png", "cover.jpg", "cover.png"}
+var backdropCandidates = []string{"backdrop.jpg", "backdrop.png", "background.jpg", "background.png", "fanart.jpg", "fanart.png"}
+
+// folderImages maps poster/backdrop files in an item folder. When several
+// candidates exist for a kind, the one with the largest pixel dimensions
+// wins (scrapers often leave a small backdrop.jpg next to a full-size
+// background.jpg); ties keep the earlier name in the candidate list.
 func folderImages(files []string) map[string]string {
-	out := map[string]string{}
+	byName := map[string]string{}
 	for _, f := range files {
-		switch strings.ToLower(filepath.Base(f)) {
-		case "poster.jpg", "poster.png":
-			out["poster"] = f
-		case "backdrop.jpg", "backdrop.png":
-			out["backdrop"] = f
-		case "fanart.jpg", "fanart.png":
-			if _, ok := out["backdrop"]; !ok {
-				out["backdrop"] = f
+		byName[strings.ToLower(filepath.Base(f))] = f
+	}
+	out := map[string]string{}
+	for kind, candidates := range map[string][]string{"poster": posterCandidates, "backdrop": backdropCandidates} {
+		best := ""
+		var bestScore int64 = -1
+		for _, name := range candidates {
+			p, ok := byName[name]
+			if !ok {
+				continue
 			}
+			if score := imageScore(p); score > bestScore {
+				best, bestScore = p, score
+			}
+		}
+		if best != "" {
+			out[kind] = best
 		}
 	}
 	return out
+}
+
+// imageScore scores an image file by pixel count, falling back to its
+// byte size when the dimensions cannot be read.
+func imageScore(path string) int64 {
+	if w, h, ok := imageDims(path); ok {
+		return int64(w) * int64(h)
+	}
+	if st, err := os.Stat(path); err == nil {
+		return st.Size()
+	}
+	return 0
+}
+
+// imageDims reads the pixel dimensions of a JPEG or PNG from its header
+// only (at most the first 512KB is read; dimensions live at the start).
+func imageDims(path string) (int, int, bool) {
+	f, err := os.Open(path)
+	if err != nil {
+		return 0, 0, false
+	}
+	defer f.Close()
+	buf := make([]byte, 512<<10)
+	n, _ := io.ReadFull(f, buf)
+	buf = buf[:n]
+	// PNG: signature, then IHDR with big-endian width/height at 16/20.
+	if n >= 24 && bytes.Equal(buf[:8], []byte{0x89, 'P', 'N', 'G', '\r', '\n', 0x1a, '\n'}) {
+		w := int(binary.BigEndian.Uint32(buf[16:20]))
+		h := int(binary.BigEndian.Uint32(buf[20:24]))
+		if w > 0 && h > 0 {
+			return w, h, true
+		}
+		return 0, 0, false
+	}
+	// JPEG: walk marker segments until a start-of-frame marker.
+	if n >= 4 && buf[0] == 0xFF && buf[1] == 0xD8 {
+		for i := 2; i+9 <= n; {
+			if buf[i] != 0xFF {
+				i++
+				continue
+			}
+			marker := buf[i+1]
+			if marker == 0xFF { // padding
+				i++
+				continue
+			}
+			// Standalone markers carry no length field.
+			if marker == 0xD8 || marker == 0x01 || (marker >= 0xD0 && marker <= 0xD9) {
+				i += 2
+				continue
+			}
+			segLen := int(binary.BigEndian.Uint16(buf[i+2 : i+4]))
+			if segLen < 2 {
+				return 0, 0, false
+			}
+			if marker == 0xC0 || marker == 0xC1 || marker == 0xC2 {
+				h := int(binary.BigEndian.Uint16(buf[i+5 : i+7]))
+				w := int(binary.BigEndian.Uint16(buf[i+7 : i+9]))
+				if w > 0 && h > 0 {
+					return w, h, true
+				}
+				return 0, 0, false
+			}
+			i += 2 + segLen
+		}
+	}
+	return 0, 0, false
 }
 
 var subExts = map[string]bool{".srt": true, ".ass": true, ".ssa": true, ".vtt": true}

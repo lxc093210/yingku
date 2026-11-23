@@ -74,6 +74,58 @@ func TestParseMovieNFO(t *testing.T) {
 	}
 }
 
+func TestParseNFOActors(t *testing.T) {
+	nfo, err := ParseNFO([]byte(`<?xml version="1.0" encoding="utf-8"?>
+<movie>
+  <title>演员测试</title>
+  <actor>
+    <name> 佟丽娅 </name>
+    <role>傅佳艺</role>
+    <type>Actor</type>
+    <thumb>https://image.tmdb.org/t/p/w185/abc.jpg</thumb>
+  </actor>
+  <actor>
+    <name>黄明昊</name>
+    <role>傅满多</role>
+    <type>Actor</type>
+  </actor>
+  <actor>
+    <name></name>
+    <role>无名</role>
+    <type>Actor</type>
+  </actor>
+</movie>`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(nfo.Actors) != 2 {
+		t.Fatalf("actors = %d, want 2 (nameless dropped)", len(nfo.Actors))
+	}
+	a := nfo.Actors[0]
+	if a.Name != "佟丽娅" || a.Role != "傅佳艺" || a.Type != "Actor" ||
+		a.Thumb != "https://image.tmdb.org/t/p/w185/abc.jpg" {
+		t.Errorf("actor[0] = %+v", a)
+	}
+	if nfo.Actors[1].Thumb != "" {
+		t.Errorf("actor[1] thumb = %q, want empty", nfo.Actors[1].Thumb)
+	}
+
+	// The cast list is capped at MaxActors.
+	var sb strings.Builder
+	sb.WriteString("<movie><title>x</title>")
+	for i := 0; i < MaxActors+5; i++ {
+		sb.WriteString("<actor><name>A</name></actor>")
+	}
+	sb.WriteString("</movie>")
+	nfo2, err := ParseNFO([]byte(sb.String()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(nfo2.Actors) != MaxActors {
+		t.Errorf("capped actors = %d, want %d", len(nfo2.Actors), MaxActors)
+	}
+}
+
 func TestParseTVShowNFO(t *testing.T) {
 	nfo, err := ParseNFOFile(filepath.Join(seriesDir, "tvshow.nfo"))
 	if err != nil {

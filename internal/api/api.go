@@ -2,12 +2,15 @@
 //
 // The internal JSON shapes deliberately mirror Emby's item model (Id, Name,
 // Type, ParentId, SeriesId, IndexNumber, ParentIndexNumber, ProviderIds) so
-// the later Emby-protocol layer maps 1:1. This server is a pure
-// library/metadata server: NanShare fronts it and performs STRM playback
-// resolution itself, so there is intentionally no playback/redirect endpoint.
+// the later Emby-protocol layer maps 1:1. NanShare still fronts the
+// Emby-protocol surface and performs STRM playback resolution for external
+// clients; the built-in web UI additionally gets a minimal playback path:
+// /stream answers with a 302 to the item's STRM target (Nan's resolver),
+// which in turn redirects to the CDN — bytes never pass through yingku.
 package api
 
 import (
+	"bufio"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -16,11 +19,18 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	"yingku/internal/scan"
 	"yingku/internal/store"
 	"yingku/internal/web"
 )
+
+// defaultUserID is the single local user (the web UI has no accounts yet).
+const defaultUserID = 1
+
+// settingTMDBKey is the app_settings key holding the TMDB API key.
+const settingTMDBKey = "tmdb_api_key"
 
 // Server wires the store, scanner and config into an http.Handler.
 type Server struct {
@@ -53,6 +63,13 @@ func New(st *store.Store, scanner *scan.Scanner, defaultRoot string) http.Handle
 	mux.HandleFunc("GET /api/libraries/{id}/items", s.handleLibraryItems)
 	mux.HandleFunc("GET /api/items/{id}", s.handleItem)
 	mux.HandleFunc("GET /api/items/{id}/image/{kind}", s.handleImage)
+	mux.HandleFunc("GET /api/items/{id}/play-info", s.handlePlayInfo)
+	mux.HandleFunc("GET /api/items/{id}/stream", s.handleStream)
+	mux.HandleFunc("POST /api/items/{id}/progress", s.handleProgress)
+	mux.HandleFunc("POST /api/items/{id}/progress/reset", s.handleProgressReset)
+	mux.HandleFunc("POST /api/items/{id}/favorite", s.handleFavorite)
+	mux.HandleFunc("GET /api/settings", s.handleSettingsGet)
+	mux.HandleFunc("PUT /api/settings", s.handleSettingsPut)
 	mux.HandleFunc("GET /api/search", s.handleSearch)
 	mux.HandleFunc("GET /api/fs/list", s.handleFSList)
 	mux.HandleFunc("POST /api/scan", s.handleScanStart)
@@ -97,6 +114,29 @@ type subtitleDTO struct {
 	Language string `json:"Language"`
 }
 
+type personDTO struct {
+	Name     string `json:"Name"`
+	Role     string `json:"Role,omitempty"`
+	Type     string `json:"Type,omitempty"`
+	ImageURL string `json:"ImageUrl,omitempty"`
+}
+
+func toPersonDTO(p store.Person) personDTO {
+	d := personDTO{Name: p.Name, Role: p.Role, Type: p.Kind}
+	// Only absolute http(s) thumbs are directly renderable; local relative
+	// paths from NFOs are not served, so they stay empty.
+	if strings.HasPrefix(p.Thumb, "http://") || strings.HasPrefix(p.Thumb, "https://") {
+		d.ImageURL = p.Thumb
+	}
+	return d
+}
+
+type userDataDTO struct {
+	Played                bool  `json:"Played"`
+	Favorite              bool  `json:"Favorite"`
+	PlaybackPositionTicks int64 `json:"PlaybackPositionTicks"`
+}
+
 type itemDTO struct {
 	ID                int64             `json:"Id"`
 	Name              string            `json:"Name"`
@@ -119,6 +159,10 @@ type itemDTO struct {
 	MediaSources      []sourceDTO       `json:"MediaSources,omitempty"`
 	Subtitles         []subtitleDTO     `json:"Subtitles,omitempty"`
 	Seasons           []seasonDTO       `json:"Seasons,omitempty"`
+	People            []personDTO       `json:"People,omitempty"`
+	UserData          *userDataDTO      `json:"UserData,omitempty"`
+	// PlaybackPositionTicks is set on home ContinueWatching entries.
+	PlaybackPositionTicks int64 `json:"PlaybackPositionTicks,omitempty"`
 }
 
 type seasonDTO struct {
@@ -242,8 +286,23 @@ func (s *Server) handleHome(w http.ResponseWriter, r *http.Request) {
 	for _, l := range libs {
 		libDTOs = append(libDTOs, toLibraryDTO(l))
 	}
+	cont, err := s.st.ContinueWatching(defaultUserID, 12)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	contDTOs := make([]itemDTO, 0, len(cont))
+	for _, e := range cont {
+		d := toDTO(e.Item)
+		d.PlaybackPositionTicks = e.ProgressTicks
+		if e.SeriesName != "" {
+			d.SeriesName = e.SeriesName
+		}
+		contDTOs = append(contDTOs, d)
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"Hero": heroDTO, "Heroes": heroDTOs, "Recent": recentDTOs, "Libraries": libDTOs,
+		"ContinueWatching": contDTOs,
 	})
 }
 
@@ -538,7 +597,274 @@ func (s *Server) handleItem(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
+	// Cast: local NFO people first; for movies/series with a TMDB id but
+	// no cast photos, lazily fill from TMDB when an API key is configured
+	// (best-effort: failures keep whatever local data exists).
+	people, err := s.st.PeopleOf(it.ID)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if (it.Type == "movie" || it.Type == "series") && it.TmdbID > 0 && peopleThumbsMissing(people) {
+		if key, kerr := s.st.GetSetting(settingTMDBKey); kerr == nil && key != "" {
+			kind := "movie"
+			if it.Type == "series" {
+				kind = "tv"
+			}
+			if cast, ferr := fetchTMDBCast(key, kind, it.TmdbID); ferr == nil && len(cast) > 0 {
+				_ = s.st.ReplacePeople(it.ID, cast)
+				people = cast
+			}
+		}
+	}
+	for _, p := range people {
+		d.People = append(d.People, toPersonDTO(p))
+	}
+	ud, err := s.st.UserDataOf(it.ID, defaultUserID)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	d.UserData = &userDataDTO{
+		Played: ud.Played, Favorite: ud.Favorite,
+		PlaybackPositionTicks: ud.ProgressTicks,
+	}
 	writeJSON(w, http.StatusOK, d)
+}
+
+// ---- playback, progress, favorites ----
+
+// resolvePlayable maps any item to the movie/episode that would actually
+// play: movies/episodes resolve to themselves, a series/season to its
+// first episode that has a media source. nil when nothing is playable.
+func (s *Server) resolvePlayable(it *store.Item) (*store.Item, error) {
+	switch it.Type {
+	case "movie", "episode":
+		srcs, err := s.st.SourcesOf(it.ID)
+		if err != nil {
+			return nil, err
+		}
+		if len(srcs) == 0 {
+			return nil, nil
+		}
+		return it, nil
+	case "series":
+		return s.st.FirstPlayableInSeries(it.ID)
+	case "season":
+		return s.st.FirstPlayableInSeason(it.ID)
+	}
+	return nil, nil
+}
+
+func (s *Server) handlePlayInfo(w http.ResponseWriter, r *http.Request) {
+	id, err := pathID(r)
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, "bad item id")
+		return
+	}
+	it, err := s.st.GetItem(id)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if it == nil {
+		writeErr(w, http.StatusNotFound, "item not found")
+		return
+	}
+	target, err := s.resolvePlayable(it)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if target == nil {
+		writeErr(w, http.StatusNotFound, "no playable source")
+		return
+	}
+	out := map[string]any{"ItemId": target.ID, "Name": target.Title}
+	if target.Type == "episode" && target.SeriesID != nil {
+		if series, err := s.st.GetItem(*target.SeriesID); err == nil && series != nil {
+			out["SeriesName"] = series.Title
+		}
+	}
+	var pos int64
+	if ud, err := s.st.UserDataOf(target.ID, defaultUserID); err == nil && ud != nil && !ud.Played {
+		pos = ud.ProgressTicks
+	}
+	out["PositionTicks"] = pos
+	writeJSON(w, http.StatusOK, out)
+}
+
+// handleStream 302-redirects to the item's STRM target URL, read fresh
+// from the .strm file. Only movies/episodes are directly playable.
+func (s *Server) handleStream(w http.ResponseWriter, r *http.Request) {
+	id, err := pathID(r)
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, "bad item id")
+		return
+	}
+	it, err := s.st.GetItem(id)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if it == nil {
+		writeErr(w, http.StatusNotFound, "item not found")
+		return
+	}
+	if it.Type != "movie" && it.Type != "episode" {
+		writeErr(w, http.StatusBadRequest, "item is not directly playable")
+		return
+	}
+	srcs, err := s.st.SourcesOf(it.ID)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if len(srcs) == 0 || srcs[0].StrmPath == "" {
+		writeErr(w, http.StatusBadGateway, "no media source")
+		return
+	}
+	target := readStrmTarget(srcs[0].StrmPath)
+	if target == "" {
+		writeErr(w, http.StatusBadGateway, "cannot read strm target")
+		return
+	}
+	w.Header().Set("Cache-Control", "no-store")
+	// Manual redirect: http.Redirect would percent-escape the non-ASCII
+	// file name in the target; the STRM URL is emitted verbatim instead.
+	w.Header().Set("Location", target)
+	w.WriteHeader(http.StatusFound)
+}
+
+// readStrmTarget returns the first line of a .strm file ("" on failure).
+func readStrmTarget(path string) string {
+	f, err := os.Open(path)
+	if err != nil {
+		return ""
+	}
+	defer f.Close()
+	line, _ := bufio.NewReader(f).ReadString('\n')
+	return strings.TrimSpace(line)
+}
+
+type progressPayload struct {
+	PositionSeconds float64 `json:"positionSeconds"`
+	DurationSeconds float64 `json:"durationSeconds"`
+}
+
+func (s *Server) handleProgress(w http.ResponseWriter, r *http.Request) {
+	id, err := pathID(r)
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, "bad item id")
+		return
+	}
+	it, err := s.st.GetItem(id)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if it == nil {
+		writeErr(w, http.StatusNotFound, "item not found")
+		return
+	}
+	var p progressPayload
+	if err := json.NewDecoder(r.Body).Decode(&p); err != nil {
+		writeErr(w, http.StatusBadRequest, "invalid JSON body")
+		return
+	}
+	if p.PositionSeconds < 0 {
+		p.PositionSeconds = 0
+	}
+	ticks := int64(p.PositionSeconds * 10_000_000)
+	played := p.DurationSeconds > 0 && p.PositionSeconds/p.DurationSeconds >= 0.9
+	if err := s.st.UpsertProgress(id, defaultUserID, ticks, played, time.Now().Unix()); err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+}
+
+func (s *Server) handleProgressReset(w http.ResponseWriter, r *http.Request) {
+	id, err := pathID(r)
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, "bad item id")
+		return
+	}
+	it, err := s.st.GetItem(id)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if it == nil {
+		writeErr(w, http.StatusNotFound, "item not found")
+		return
+	}
+	if err := s.st.ResetProgress(id, defaultUserID); err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+}
+
+func (s *Server) handleFavorite(w http.ResponseWriter, r *http.Request) {
+	id, err := pathID(r)
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, "bad item id")
+		return
+	}
+	it, err := s.st.GetItem(id)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if it == nil {
+		writeErr(w, http.StatusNotFound, "item not found")
+		return
+	}
+	var p struct {
+		Favorite bool `json:"favorite"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&p); err != nil {
+		writeErr(w, http.StatusBadRequest, "invalid JSON body")
+		return
+	}
+	if err := s.st.SetFavorite(id, defaultUserID, p.Favorite); err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]bool{"ok": true, "favorite": p.Favorite})
+}
+
+// ---- app settings ----
+
+func (s *Server) handleSettingsGet(w http.ResponseWriter, r *http.Request) {
+	key, err := s.st.GetSetting(settingTMDBKey)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	// Only whether a key exists is exposed — never the key itself.
+	writeJSON(w, http.StatusOK, map[string]bool{"tmdbKeySet": key != ""})
+}
+
+func (s *Server) handleSettingsPut(w http.ResponseWriter, r *http.Request) {
+	var p struct {
+		TMDBAPIKey string `json:"tmdbApiKey"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&p); err != nil {
+		writeErr(w, http.StatusBadRequest, "invalid JSON body")
+		return
+	}
+	if err := s.st.SetSetting(settingTMDBKey, strings.TrimSpace(p.TMDBAPIKey)); err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	key, err := s.st.GetSetting(settingTMDBKey)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]bool{"tmdbKeySet": key != ""})
 }
 
 func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {

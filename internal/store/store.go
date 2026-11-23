@@ -77,16 +77,22 @@ const itemCols = `id, library_id, type, parent_id, series_id, season_num, episod
 	EXISTS(SELECT 1 FROM images WHERE item_id = items.id AND kind = 'backdrop')`
 
 func scanItem(sc interface{ Scan(...any) error }) (*Item, error) {
+	return scanItemX(sc)
+}
+
+// scanItemX is scanItem plus optional trailing columns scanned into extra.
+func scanItemX(sc interface{ Scan(...any) error }, extra ...any) (*Item, error) {
 	var it Item
 	var parentID, seriesID sql.NullInt64
 	var seasonNum, episodeNum sql.NullInt64
 	var genres string
 	var hasPoster, hasBackdrop int
-	err := sc.Scan(&it.ID, &it.LibraryID, &it.Type, &parentID, &seriesID,
+	dests := []any{&it.ID, &it.LibraryID, &it.Type, &parentID, &seriesID,
 		&seasonNum, &episodeNum, &it.Title, &it.OriginalTitle, &it.Year,
 		&it.Overview, &it.Rating, &it.RuntimeMin, &genres, &it.TmdbID, &it.Path,
 		&it.SortTitle, &it.Fingerprint, &it.CreatedAt, &it.UpdatedAt,
-		&hasPoster, &hasBackdrop)
+		&hasPoster, &hasBackdrop}
+	err := sc.Scan(append(dests, extra...)...)
 	if err != nil {
 		return nil, err
 	}
@@ -503,10 +509,19 @@ func (s *Store) ListTopLevel(libraryID int64, sort, cursor string, limit int) ([
 			args = append(args, int(ck.F), int(ck.F), ck.ID)
 		}
 	case "rating":
-		order = `rating DESC, id ASC`
+		// Plausible ratings first (bogus 10.0 and unrated 0.0 sink to the
+		// bottom), then rating DESC — the cursor predicate mirrors the
+		// two-bucket ordering via the cursor rating's own bucket.
+		order = `(CASE WHEN rating BETWEEN 6.5 AND 9.9 THEN 0 ELSE 1 END), rating DESC, id ASC`
 		if cursor != "" {
-			where = ` AND (rating < ? OR (rating = ? AND id > ?))`
-			args = append(args, ck.F, ck.F, ck.ID)
+			bucket := 1
+			if ck.F >= 6.5 && ck.F <= 9.9 {
+				bucket = 0
+			}
+			where = ` AND ((CASE WHEN rating BETWEEN 6.5 AND 9.9 THEN 0 ELSE 1 END) > ?
+				OR ((CASE WHEN rating BETWEEN 6.5 AND 9.9 THEN 0 ELSE 1 END) = ? AND rating < ?)
+				OR ((CASE WHEN rating BETWEEN 6.5 AND 9.9 THEN 0 ELSE 1 END) = ? AND rating = ? AND id > ?))`
+			args = append(args, bucket, bucket, ck.F, bucket, ck.F, ck.ID)
 		}
 	default:
 		sort = "title"
@@ -643,15 +658,19 @@ func (s *Store) Hero() (*Item, error) {
 }
 
 // Heroes returns up to limit highest-rated top-level items that have a
-// backdrop (hero rotation candidates for the home page).
+// backdrop (hero rotation candidates for the home page). Ratings are
+// restricted to the plausible band: the library carries thousands of 0.0
+// (unrated) rows and a batch of bogus 10.0 scores written by scrapers,
+// both of which would otherwise poison the rotation.
 func (s *Store) Heroes(limit int) ([]*Item, error) {
 	if limit <= 0 || limit > 50 {
 		limit = 5
 	}
 	rows, err := s.db.Query(`SELECT `+itemCols+` FROM items
 		WHERE parent_id IS NULL
+		  AND rating BETWEEN 6.5 AND 9.9
 		  AND EXISTS(SELECT 1 FROM images WHERE item_id = items.id AND kind = 'backdrop')
-		ORDER BY rating DESC, id ASC LIMIT ?`, limit)
+		ORDER BY rating DESC, year DESC, id ASC LIMIT ?`, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -797,6 +816,217 @@ func (s *Store) Stats() (*Stats, error) {
 		st.MediaInfoSource[src] = n
 	}
 	return st, rows2.Err()
+}
+
+// ---- people ----
+
+// Person is one cast/crew row of an item.
+type Person struct {
+	Name  string
+	Role  string
+	Kind  string // NFO <type> or TMDB kind, usually "Actor"
+	Thumb string // image URL (or local path); may be empty
+	Ord   int
+}
+
+// ReplacePeople swaps all people rows of an item (transactional variant
+// used by the scanner).
+func (t *Tx) ReplacePeople(itemID int64, people []Person) error {
+	return replacePeople(t.tx, itemID, people)
+}
+
+// ReplacePeople swaps all people rows of an item.
+func (s *Store) ReplacePeople(itemID int64, people []Person) error {
+	return replacePeople(s.db, itemID, people)
+}
+
+type execer interface {
+	Exec(query string, args ...any) (sql.Result, error)
+}
+
+func replacePeople(x execer, itemID int64, people []Person) error {
+	if _, err := x.Exec(`DELETE FROM people WHERE item_id = ?`, itemID); err != nil {
+		return err
+	}
+	for _, p := range people {
+		if _, err := x.Exec(`INSERT INTO people(item_id, name, role, kind, thumb, ord)
+			VALUES (?, ?, ?, ?, ?, ?)`, itemID, p.Name, p.Role, p.Kind, p.Thumb, p.Ord); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// PeopleOf returns the people of an item in billing order.
+func (s *Store) PeopleOf(itemID int64) ([]Person, error) {
+	rows, err := s.db.Query(`SELECT name, role, kind, thumb, ord FROM people
+		WHERE item_id = ? ORDER BY ord, name`, itemID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []Person
+	for rows.Next() {
+		var p Person
+		if err := rows.Scan(&p.Name, &p.Role, &p.Kind, &p.Thumb, &p.Ord); err != nil {
+			return nil, err
+		}
+		out = append(out, p)
+	}
+	return out, rows.Err()
+}
+
+// ---- app settings ----
+
+// GetSetting returns a setting value ("" when unset).
+func (s *Store) GetSetting(key string) (string, error) {
+	var v string
+	err := s.db.QueryRow(`SELECT value FROM app_settings WHERE key = ?`, key).Scan(&v)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", nil
+	}
+	return v, err
+}
+
+// SetSetting stores a setting value; an empty value deletes the row.
+func (s *Store) SetSetting(key, value string) error {
+	if value == "" {
+		_, err := s.db.Exec(`DELETE FROM app_settings WHERE key = ?`, key)
+		return err
+	}
+	_, err := s.db.Exec(`INSERT INTO app_settings(key, value) VALUES (?, ?)
+		ON CONFLICT(key) DO UPDATE SET value = excluded.value`, key, value)
+	return err
+}
+
+// ---- user data (playback state, favorites) ----
+
+// UserData is one user's state for one item.
+type UserData struct {
+	ProgressTicks int64
+	Played        bool
+	Favorite      bool
+	LastPlayedAt  int64
+}
+
+// UserDataOf returns the user's state for an item (zero value when none).
+func (s *Store) UserDataOf(itemID, userID int64) (*UserData, error) {
+	var ud UserData
+	var played, favorite int
+	err := s.db.QueryRow(`SELECT progress_ticks, played, favorite, last_played_at
+		FROM user_data WHERE item_id = ? AND user_id = ?`, itemID, userID).
+		Scan(&ud.ProgressTicks, &played, &favorite, &ud.LastPlayedAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return &UserData{}, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	ud.Played = played != 0
+	ud.Favorite = favorite != 0
+	return &ud, nil
+}
+
+// UpsertProgress records playback progress for an item.
+func (s *Store) UpsertProgress(itemID, userID, ticks int64, played bool, lastPlayedAt int64) error {
+	_, err := s.db.Exec(`INSERT INTO user_data(item_id, user_id, progress_ticks, played, favorite, last_played_at)
+		VALUES (?, ?, ?, ?, 0, ?)
+		ON CONFLICT(item_id, user_id) DO UPDATE SET
+			progress_ticks = excluded.progress_ticks,
+			played = excluded.played,
+			last_played_at = excluded.last_played_at`,
+		itemID, userID, ticks, boolInt(played), lastPlayedAt)
+	return err
+}
+
+// ResetProgress clears progress/played for an item (favorite is kept).
+func (s *Store) ResetProgress(itemID, userID int64) error {
+	_, err := s.db.Exec(`INSERT INTO user_data(item_id, user_id, progress_ticks, played, favorite, last_played_at)
+		VALUES (?, ?, 0, 0, 0, 0)
+		ON CONFLICT(item_id, user_id) DO UPDATE SET
+			progress_ticks = 0, played = 0, last_played_at = 0`, itemID, userID)
+	return err
+}
+
+// SetFavorite sets the favorite flag for an item.
+func (s *Store) SetFavorite(itemID, userID int64, favorite bool) error {
+	_, err := s.db.Exec(`INSERT INTO user_data(item_id, user_id, progress_ticks, played, favorite, last_played_at)
+		VALUES (?, ?, 0, 0, ?, 0)
+		ON CONFLICT(item_id, user_id) DO UPDATE SET favorite = excluded.favorite`,
+		itemID, userID, boolInt(favorite))
+	return err
+}
+
+func boolInt(b bool) int {
+	if b {
+		return 1
+	}
+	return 0
+}
+
+// ContinueEntry is a partially watched movie/episode for the home page.
+type ContinueEntry struct {
+	Item          *Item
+	ProgressTicks int64
+	SeriesName    string // set for episodes
+}
+
+// ContinueWatching lists in-progress (started, not finished) movies and
+// episodes for the user, most recently played first.
+func (s *Store) ContinueWatching(userID int64, limit int) ([]ContinueEntry, error) {
+	if limit <= 0 || limit > 50 {
+		limit = 12
+	}
+	rows, err := s.db.Query(`SELECT `+itemCols+`, ud.progress_ticks,
+			COALESCE((SELECT title FROM items s WHERE s.id = items.series_id), '')
+		FROM items
+		JOIN user_data ud ON ud.item_id = items.id AND ud.user_id = ?
+		WHERE ud.progress_ticks > 0 AND ud.played = 0
+		  AND items.type IN ('movie', 'episode')
+		ORDER BY ud.last_played_at DESC, items.id DESC LIMIT ?`, userID, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []ContinueEntry
+	for rows.Next() {
+		var ticks int64
+		var seriesName string
+		it, err := scanItemX(rows, &ticks, &seriesName)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, ContinueEntry{Item: it, ProgressTicks: ticks, SeriesName: seriesName})
+	}
+	return out, rows.Err()
+}
+
+// FirstPlayableInSeries returns the first episode (season, episode, id
+// order) of a series that has at least one media source, or nil.
+func (s *Store) FirstPlayableInSeries(seriesID int64) (*Item, error) {
+	row := s.db.QueryRow(`SELECT `+itemCols+` FROM items
+		WHERE type = 'episode' AND series_id = ?
+		  AND EXISTS(SELECT 1 FROM media_sources WHERE item_id = items.id)
+		ORDER BY COALESCE(season_num, 0), COALESCE(episode_num, 0), id LIMIT 1`, seriesID)
+	it, err := scanItem(row)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	return it, err
+}
+
+// FirstPlayableInSeason returns the first episode of a season that has at
+// least one media source, or nil.
+func (s *Store) FirstPlayableInSeason(seasonID int64) (*Item, error) {
+	row := s.db.QueryRow(`SELECT `+itemCols+` FROM items
+		WHERE type = 'episode' AND parent_id = ?
+		  AND EXISTS(SELECT 1 FROM media_sources WHERE item_id = items.id)
+		ORDER BY COALESCE(season_num, 0), COALESCE(episode_num, 0), id LIMIT 1`, seasonID)
+	it, err := scanItem(row)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	return it, err
 }
 
 // IndexEntry is the scanner's lightweight view of an existing item.

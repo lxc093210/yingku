@@ -54,7 +54,38 @@ func Open(path string) (*Store, error) {
 		db.Close()
 		return nil, fmt.Errorf("migrate library_paths: %w", err)
 	}
+	// Migration: user_data gained last_played_at after the first release.
+	has, err := columnExists(db, "user_data", "last_played_at")
+	if err != nil {
+		db.Close()
+		return nil, fmt.Errorf("migrate user_data: %w", err)
+	}
+	if !has {
+		if _, err := db.Exec(`ALTER TABLE user_data ADD COLUMN last_played_at INTEGER NOT NULL DEFAULT 0`); err != nil {
+			db.Close()
+			return nil, fmt.Errorf("migrate user_data last_played_at: %w", err)
+		}
+	}
 	return s, nil
+}
+
+// columnExists reports whether table has a column of the given name.
+func columnExists(db *sql.DB, table, column string) (bool, error) {
+	rows, err := db.Query(`SELECT name FROM pragma_table_info(?)`, table)
+	if err != nil {
+		return false, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			return false, err
+		}
+		if name == column {
+			return true, nil
+		}
+	}
+	return false, rows.Err()
 }
 
 // Close closes the database.
@@ -137,6 +168,24 @@ CREATE TABLE IF NOT EXISTS subtitles (
 );
 CREATE INDEX IF NOT EXISTS idx_sub_item ON subtitles(item_id);
 
+-- Cast & crew of an item, replaced wholesale from the item's NFO on scan.
+CREATE TABLE IF NOT EXISTS people (
+  item_id INTEGER NOT NULL REFERENCES items(id) ON DELETE CASCADE,
+  name    TEXT NOT NULL DEFAULT '',
+  role    TEXT NOT NULL DEFAULT '',
+  kind    TEXT NOT NULL DEFAULT '',
+  thumb   TEXT NOT NULL DEFAULT '',
+  ord     INTEGER NOT NULL DEFAULT 0,
+  PRIMARY KEY (item_id, ord)
+);
+CREATE INDEX IF NOT EXISTS idx_people_item ON people(item_id);
+
+-- Small key/value store for application settings (e.g. the TMDB API key).
+CREATE TABLE IF NOT EXISTS app_settings (
+  key   TEXT PRIMARY KEY,
+  value TEXT NOT NULL DEFAULT ''
+);
+
 -- User playback state lives apart from items so rescans never touch it.
 CREATE TABLE IF NOT EXISTS user_data (
   item_id        INTEGER NOT NULL REFERENCES items(id) ON DELETE CASCADE,
@@ -144,6 +193,7 @@ CREATE TABLE IF NOT EXISTS user_data (
   progress_ticks INTEGER NOT NULL DEFAULT 0,
   played         INTEGER NOT NULL DEFAULT 0,
   favorite       INTEGER NOT NULL DEFAULT 0,
+  last_played_at INTEGER NOT NULL DEFAULT 0, -- unix seconds, 0 = never
   PRIMARY KEY (item_id, user_id)
 );
 
