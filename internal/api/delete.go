@@ -33,8 +33,32 @@ type deletePreviewDTO struct {
 // registered subtitles and images).
 func (s *Server) deleteTargets(it *store.Item) ([]string, error) {
 	switch it.Type {
-	case "movie", "series":
+	case "series":
 		return []string{filepath.Clean(it.Path)}, nil
+	case "movie":
+		// A merged (multi-version) movie lives in several folders:
+		// the primary one plus the folder of every source. Deleting
+		// the item removes them all, like Emby deleting every
+		// version's files; anything less would resurrect the movie
+		// from the surviving folder on the next scan.
+		seen := map[string]bool{}
+		var out []string
+		add := func(p string) {
+			c := filepath.Clean(p)
+			if !seen[c] {
+				seen[c] = true
+				out = append(out, c)
+			}
+		}
+		add(it.Path)
+		sources, err := s.st.SourcesOf(it.ID)
+		if err != nil {
+			return nil, err
+		}
+		for _, src := range sources {
+			add(filepath.Dir(src.StrmPath))
+		}
+		return out, nil
 	case "episode":
 		strm := filepath.Clean(it.Path)
 		stem := strings.TrimSuffix(strm, filepath.Ext(strm))

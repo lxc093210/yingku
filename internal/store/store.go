@@ -245,6 +245,116 @@ func (s *Store) UpdateLibrary(id int64, name, kind string, paths []string) error
 	return tx.Commit()
 }
 
+// ItemsByTmdb returns every top-level item of one library carrying
+// the given TMDB id, oldest first. Before version merging lands there
+// can be several (one per folder); afterwards exactly one.
+func (s *Store) ItemsByTmdb(libraryID, tmdbID int64) ([]*Item, error) {
+	rows, err := s.db.Query(`SELECT `+itemCols+` FROM items
+		WHERE library_id = ? AND tmdb_id = ? AND parent_id IS NULL AND type = 'movie' ORDER BY id`, libraryID, tmdbID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []*Item
+	for rows.Next() {
+		it, err := scanItem(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, it)
+	}
+	return out, rows.Err()
+}
+
+// MergeUserDataInto folds the user_data rows of the doomed items into
+// the survivor's: a user the survivor has no row for inherits the
+// doomed row; when both have one, the more advanced row wins (played
+// first, then larger progress, then most recently played) and the
+// favorite flag is OR-ed. Doomed rows are removed afterwards.
+func (s *Store) MergeUserDataInto(survivor int64, doomed []int64) error {
+	if len(doomed) == 0 {
+		return nil
+	}
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	for _, d := range doomed {
+		rows, err := tx.Query(`SELECT user_id, progress_ticks, played, favorite, last_played_at
+			FROM user_data WHERE item_id = ?`, d)
+		if err != nil {
+			return err
+		}
+		type ud struct {
+			user string
+			prog int64
+			played, fav, last int64
+		}
+		var list []ud
+		for rows.Next() {
+			var u ud
+			if err := rows.Scan(&u.user, &u.prog, &u.played, &u.fav, &u.last); err != nil {
+				rows.Close()
+				return err
+			}
+			list = append(list, u)
+		}
+		rows.Close()
+		if err := rows.Err(); err != nil {
+			return err
+		}
+		for _, u := range list {
+			var prog, played, fav, last int64
+			err := tx.QueryRow(`SELECT progress_ticks, played, favorite, last_played_at
+				FROM user_data WHERE item_id = ? AND user_id = ?`, survivor, u.user).
+				Scan(&prog, &played, &fav, &last)
+			if err == sql.ErrNoRows {
+				if _, err := tx.Exec(`INSERT INTO user_data(item_id, user_id, progress_ticks, played, favorite, last_played_at)
+					VALUES (?, ?, ?, ?, ?, ?)`, survivor, u.user, u.prog, u.played, u.fav, u.last); err != nil {
+					return err
+				}
+				continue
+			}
+			if err != nil {
+				return err
+			}
+			win := u
+			if played > u.played || (played == u.played && prog >= u.prog) {
+				win = ud{user: u.user, prog: prog, played: played, fav: fav, last: last}
+			}
+			if fav == 1 {
+				win.fav = 1
+			}
+			if last > win.last {
+				win.last = last
+			}
+			if _, err := tx.Exec(`UPDATE user_data SET progress_ticks = ?, played = ?, favorite = ?, last_played_at = ?
+				WHERE item_id = ? AND user_id = ?`, win.prog, win.played, win.fav, win.last, survivor, u.user); err != nil {
+				return err
+			}
+		}
+		if _, err := tx.Exec(`DELETE FROM user_data WHERE item_id = ?`, d); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
+// DeleteItemByID removes one item; children (sources, images,
+// subtitles, people, user_data) cascade.
+func (s *Store) DeleteItemByID(id int64) error {
+	_, err := s.db.Exec(`DELETE FROM items WHERE id = ?`, id)
+	return err
+}
+
+// SetItemPath rewrites an item's folder path (used when a merged
+// item's primary version folder changes).
+func (s *Store) SetItemPath(id int64, path string) error {
+	_, err := s.db.Exec(`UPDATE items SET path = ? WHERE id = ?`, path, id)
+	return err
+}
+
 // DeleteLibrary removes a library and (via FK cascade) all its items and
 // their sources/images/subtitles. Files on disk are never touched.
 func (s *Store) DeleteLibrary(id int64) error {

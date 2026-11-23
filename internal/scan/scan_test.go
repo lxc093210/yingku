@@ -801,3 +801,79 @@ func TestScanLogicVersionAndEpisodeSubtitles(t *testing.T) {
 		t.Errorf("post-force rescan items/skipped = %d/%d, want 0/5", got.Items, got.Skipped)
 	}
 }
+
+func TestScanMergesMovieVersions(t *testing.T) {
+	st := openTemp(t)
+	base := t.TempDir()
+	mk := func(root, file string) string {
+		dir := filepath.Join(root, "Some Movie (2001) {tmdbid-4242}")
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, file), []byte("http://example.com/"+file), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		return dir
+	}
+	rootA := filepath.Join(base, "rootA")
+	rootB := filepath.Join(base, "rootB")
+	dirA := mk(rootA, "Some.Movie.2001.1080p.WEB-DL.x264.strm")
+	dirB := mk(rootB, "Some.Movie.2001.2160p.WEB-DL.x265.strm")
+	id, err := st.CreateLibrary("电影库", "movie", []string{rootA, rootB})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sc := New(st)
+	if err := sc.ScanLibraryByID(id); err != nil {
+		t.Fatal(err)
+	}
+	items, err := st.ItemsByTmdb(id, 4242)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != 1 {
+		t.Fatalf("merged items = %d, want 1", len(items))
+	}
+	merged := items[0]
+	if merged.Path != dirB {
+		t.Errorf("primary path = %q, want the 2160p folder %q", merged.Path, dirB)
+	}
+	sources, err := st.SourcesOf(merged.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(sources) != 2 {
+		t.Fatalf("sources = %d, want 2", len(sources))
+	}
+	if sources[0].Width != 3840 {
+		t.Errorf("first source width = %d, want 3840 (best version first)", sources[0].Width)
+	}
+	// Rescan: stable id, everything skipped.
+	sc2 := New(st)
+	if err := sc2.ScanLibraryByID(id); err != nil {
+		t.Fatal(err)
+	}
+	if got := sc2.Status(); got.Items != 0 {
+		t.Errorf("rescan items = %d, want 0 (all skipped)", got.Items)
+	}
+	items2, _ := st.ItemsByTmdb(id, 4242)
+	if len(items2) != 1 || items2[0].ID != merged.ID {
+		t.Fatalf("after rescan items = %v, want the same merged item", items2)
+	}
+	// Drop one version folder: the item survives with one source.
+	if err := os.RemoveAll(dirA); err != nil {
+		t.Fatal(err)
+	}
+	sc3 := New(st)
+	if err := sc3.ScanLibraryByID(id); err != nil {
+		t.Fatal(err)
+	}
+	items3, _ := st.ItemsByTmdb(id, 4242)
+	if len(items3) != 1 || items3[0].ID != merged.ID {
+		t.Fatalf("after folder removal items = %v, want the same item", items3)
+	}
+	sources3, _ := st.SourcesOf(merged.ID)
+	if len(sources3) != 1 {
+		t.Errorf("sources after removal = %d, want 1", len(sources3))
+	}
+}

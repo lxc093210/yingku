@@ -61,6 +61,11 @@ type Scanner struct {
 	// scan-logic version lags CurrentScanLogicVersion.
 	forceFull bool
 
+	// groups accumulates movie folders sharing one TMDB id during a
+	// library scan; they are written as ONE item with every folder's
+	// sources (Emby-style version merging) when the scan flushes.
+	groups map[int64]*movieGroup
+
 	mu     sync.Mutex
 	status Status
 }
@@ -346,6 +351,8 @@ func (s *Scanner) scanLibrary(lib store.Library, owners []rootOwner) error {
 	seen := map[string]struct{}{}
 	w := &writer{st: s.st}
 	now := time.Now().Unix()
+	s.groups = map[int64]*movieGroup{}
+	defer func() { s.groups = nil }()
 	for _, libPath := range lib.Paths {
 		if err := s.scanPath(lib, libPath, owners, index, seen, w, now); err != nil {
 			return err
@@ -353,6 +360,15 @@ func (s *Scanner) scanLibrary(lib store.Library, owners []rootOwner) error {
 	}
 	if err := w.flush(); err != nil {
 		return err
+	}
+	if len(s.groups) > 0 {
+		gw := &writer{st: s.st}
+		if err := s.flushMovieGroups(gw, index, seen, lib.ID, now); err != nil {
+			return err
+		}
+		if err := gw.flush(); err != nil {
+			return err
+		}
 	}
 	deleted, err := s.st.DeleteVanished(lib.ID, seen)
 	if err != nil {
@@ -656,12 +672,40 @@ func (s *Scanner) skip(seen map[string]struct{}, path string) {
 	s.bump(func(st *Status) { st.Skipped++ })
 }
 
+// movieGroup collects every folder of one TMDB id seen during a
+// library scan so they can be merged into a single multi-version
+// item at flush time.
+type movieGroup struct {
+	folders []*movieFolderRef
+}
+
+type movieFolderRef struct {
+	ctx      *folderCtx
+	strms    []string
+	sidecars []string
+}
+
 func (s *Scanner) processMovieFolder(w *writer, index map[string]store.IndexEntry, seen map[string]struct{}, libID int64, ctx *folderCtx, now int64) error {
 	strms := filterExt(ctx.files, ".strm")
 	if len(strms) == 0 {
 		return nil
 	}
 	sidecars := sidecarsOf(strms)
+	fi := meta.ParseFolderName(filepath.Base(ctx.itemDir))
+	// Movies with a TMDB id are version-merged: folders sharing the
+	// id (different releases, or the same library reached through
+	// several roots) become one item. Registration only records the
+	// folder; building and writing happen in flushMovieGroups.
+	if fi.Tmdb > 0 && s.groups != nil {
+		key := int64(fi.Tmdb)
+		g := s.groups[key]
+		if g == nil {
+			g = &movieGroup{}
+			s.groups[key] = g
+		}
+		g.folders = append(g.folders, &movieFolderRef{ctx: ctx, strms: strms, sidecars: sidecars})
+		return nil
+	}
 	fp := fingerprint(strms, sidecars)
 	// A stored date_added of 0 marks a legacy row: reprocess once even
 	// when the fingerprint is unchanged so the backfill lands (see
@@ -670,6 +714,16 @@ func (s *Scanner) processMovieFolder(w *writer, index map[string]store.IndexEntr
 		s.skip(seen, ctx.itemDir)
 		return nil
 	}
+	_, err := s.writeOne(w, index, seen, s.buildMoviePending(libID, ctx, strms, sidecars, fp, now))
+	return err
+}
+
+// buildMoviePending assembles one movie folder's item payload:
+// metadata from the folder name + sibling NFO, one source per strm
+// with its resolved media info, the folder's images, subtitles and
+// cast. Used directly for unmerged movies and per folder for merged
+// version groups.
+func (s *Scanner) buildMoviePending(libID int64, ctx *folderCtx, strms, sidecars []string, fp string, now int64) pendingItem {
 	fi := meta.ParseFolderName(filepath.Base(ctx.itemDir))
 	it := &store.Item{
 		LibraryID: libID, Type: "movie", Path: ctx.itemDir,
@@ -682,7 +736,6 @@ func (s *Scanner) processMovieFolder(w *writer, index map[string]store.IndexEntr
 	if nfo != nil {
 		applyNFO(it, nfo)
 	}
-	// Sources for every strm in the folder.
 	var sources []store.MediaSource
 	for _, strm := range strms {
 		mi := meta.ResolveMediaInfo(strm, s.providers)
@@ -699,13 +752,164 @@ func (s *Scanner) processMovieFolder(w *writer, index map[string]store.IndexEntr
 	if it.RuntimeMin == 0 {
 		it.RuntimeMin = firstMI.RuntimeMin
 	}
-	_, err := s.writeOne(w, index, seen, pendingItem{
+	return pendingItem{
 		item: it, sources: sources,
 		images: folderImages(ctx.files),
 		subs:   matchSubtitles(ctx.files, len(strms), strms),
 		people: actorsToPeople(nfo),
-	})
-	return err
+	}
+}
+
+// flushMovieGroups writes every registered TMDB group as one merged
+// item: the best folder (highest-resolution source, then path)
+// supplies the metadata and primary path, all folders contribute
+// their sources in quality order, and pre-existing duplicate items
+// are folded in — user data migrates to the survivor, the rest are
+// deleted. A group whose combined fingerprint still matches the
+// stored item is skipped whole.
+func (s *Scanner) flushMovieGroups(w *writer, index map[string]store.IndexEntry, seen map[string]struct{}, libID int64, now int64) error {
+	keys := make([]int64, 0, len(s.groups))
+	for k := range s.groups {
+		keys = append(keys, k)
+	}
+	sort.Slice(keys, func(i, j int) bool { return keys[i] < keys[j] })
+	for _, tmdb := range keys {
+		g := s.groups[tmdb]
+		var allStrms, allSide []string
+		for _, f := range g.folders {
+			allStrms = append(allStrms, f.strms...)
+			allSide = append(allSide, f.sidecars...)
+		}
+		combined := fingerprint(allStrms, allSide)
+		existing, err := s.st.ItemsByTmdb(libID, tmdb)
+		if err != nil {
+			return err
+		}
+		if len(existing) == 1 && !s.forceFull && existing[0].Fingerprint == combined && existing[0].DateAdded > 0 {
+			seen[existing[0].Path] = struct{}{}
+			for range g.folders {
+				s.bump(func(st *Status) { st.Skipped++ })
+			}
+			continue
+		}
+		type built struct {
+			p         pendingItem
+			bestW     int
+			bestH     int
+		}
+		var bs []built
+		for _, f := range g.folders {
+			p := s.buildMoviePending(libID, f.ctx, f.strms, f.sidecars, "", now)
+			bw, bh := 0, 0
+			for _, src := range p.sources {
+				if src.Width > bw || (src.Width == bw && src.Height > bh) {
+					bw, bh = src.Width, src.Height
+				}
+			}
+			bs = append(bs, built{p: p, bestW: bw, bestH: bh})
+		}
+		sort.SliceStable(bs, func(i, j int) bool {
+			if bs[i].bestW != bs[j].bestW {
+				return bs[i].bestW > bs[j].bestW
+			}
+			if bs[i].bestH != bs[j].bestH {
+				return bs[i].bestH > bs[j].bestH
+			}
+			return bs[i].p.item.Path < bs[j].p.item.Path
+		})
+		var sources []store.MediaSource
+		for _, b := range bs {
+			sources = append(sources, b.p.sources...)
+		}
+		sort.SliceStable(sources, func(i, j int) bool {
+			if sources[i].Width != sources[j].Width {
+				return sources[i].Width > sources[j].Width
+			}
+			if sources[i].Height != sources[j].Height {
+				return sources[i].Height > sources[j].Height
+			}
+			return sources[i].StrmPath < sources[j].StrmPath
+		})
+		images := map[string]store.ImageFile{}
+		for _, b := range bs {
+			for k, v := range b.p.images {
+				if _, ok := images[k]; !ok {
+					images[k] = v
+				}
+			}
+		}
+		subSeen := map[string]bool{}
+		var subs []store.Subtitle
+		for _, b := range bs {
+			for _, sub := range b.p.subs {
+				if !subSeen[sub.Path] {
+					subSeen[sub.Path] = true
+					subs = append(subs, sub)
+				}
+			}
+		}
+		var people []store.Person
+		for _, b := range bs {
+			if len(b.p.people) > 0 {
+				people = b.p.people
+				break
+			}
+		}
+		item := bs[0].p.item
+		item.Fingerprint = combined
+		var maxAdded int64
+		for _, b := range bs {
+			if b.p.item.DateAdded > maxAdded {
+				maxAdded = b.p.item.DateAdded
+			}
+		}
+		item.DateAdded = maxAdded
+		if item.RuntimeMin == 0 {
+			for _, b := range bs {
+				if b.p.item.RuntimeMin > 0 {
+					item.RuntimeMin = b.p.item.RuntimeMin
+					break
+				}
+			}
+		}
+		if len(existing) > 0 {
+			survivor := existing[0]
+			for _, e := range existing {
+				if e.Path == item.Path {
+					survivor = e
+					break
+				}
+			}
+			var doomed []int64
+			for _, e := range existing {
+				if e.ID != survivor.ID {
+					doomed = append(doomed, e.ID)
+				}
+			}
+			if len(doomed) > 0 {
+				if err := s.st.MergeUserDataInto(survivor.ID, doomed); err != nil {
+					return err
+				}
+				for _, id := range doomed {
+					if err := s.st.DeleteItemByID(id); err != nil {
+						return err
+					}
+				}
+				s.bump(func(st *Status) { st.Deleted += len(doomed) })
+			}
+			if survivor.Path != item.Path {
+				if err := s.st.SetItemPath(survivor.ID, item.Path); err != nil {
+					return err
+				}
+			}
+		}
+		if _, err := s.writeOne(w, index, seen, pendingItem{
+			item: item, sources: sources, images: images, subs: subs, people: people,
+		}); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (s *Scanner) processSeriesFolder(w *writer, index map[string]store.IndexEntry, seen map[string]struct{}, libID int64, ctx *folderCtx, now int64) error {
