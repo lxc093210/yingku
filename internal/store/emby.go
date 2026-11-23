@@ -125,6 +125,29 @@ func (s *Store) QueryItems(f ItemsFilter) ([]*Item, int, error) {
 	return out, total, nil
 }
 
+// LibraryArtworkItem returns the id of the item whose artwork best
+// represents a library on client home screens: the newest top-level
+// item with a registered backdrop, falling back to one with a poster.
+// Zero when the library has no artwork at all.
+func (s *Store) LibraryArtworkItem(libraryID int64) (int64, error) {
+	for _, kind := range []string{"backdrop", "poster"} {
+		var id int64
+		err := s.db.QueryRow(
+			`SELECT i.id FROM items i
+			 JOIN images im ON im.item_id = i.id AND im.kind = ?
+			 WHERE i.library_id = ? AND i.parent_id IS NULL
+			 ORDER BY i.date_added DESC, i.id DESC LIMIT 1`,
+			kind, libraryID).Scan(&id)
+		if err == nil {
+			return id, nil
+		}
+		if err != sql.ErrNoRows {
+			return 0, err
+		}
+	}
+	return 0, nil
+}
+
 // ChildCounts returns the direct-child count per parent id, for the
 // parents that have at least one child.
 func (s *Store) ChildCounts(parentIDs []int64) (map[int64]int, error) {

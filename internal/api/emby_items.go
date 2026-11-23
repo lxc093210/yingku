@@ -67,6 +67,7 @@ type embyItemDTO struct {
 	DateCreated       string            `json:"DateCreated,omitempty"`
 	ImageTags         map[string]string `json:"ImageTags,omitempty"`
 	BackdropImageTags []string          `json:"BackdropImageTags,omitempty"`
+	PrimaryImageAspectRatio *float64    `json:"PrimaryImageAspectRatio,omitempty"`
 	UserData          *embyUserDataDTO  `json:"UserData,omitempty"`
 }
 
@@ -205,10 +206,10 @@ func (s *Server) toEmbyDTO(it *store.Item, counts map[int64]int, uds map[int64]*
 	return d
 }
 
-func embyLibraryDTO(l store.Library) embyItemDTO {
+func (s *Server) embyLibraryDTO(l store.Library) embyItemDTO {
 	ct := map[string]string{"movie": "movies", "series": "tvshows", "mixed": "mixed"}[l.Kind]
 	n := l.ItemCount
-	return embyItemDTO{
+	d := embyItemDTO{
 		Id:             embyLibraryID(l.ID),
 		Name:           l.Name,
 		Type:           "CollectionFolder",
@@ -216,6 +217,18 @@ func embyLibraryDTO(l store.Library) embyItemDTO {
 		IsFolder:       true,
 		ChildCount:     &n,
 	}
+	// Library cover: clients only request a CollectionFolder's image
+	// when the DTO advertises one. The image endpoint resolves the
+	// tag back to a representative item's backdrop (see
+	// handleEmbyImage), so the tag just needs to be stable per library.
+	if artID, err := s.st.LibraryArtworkItem(l.ID); err == nil && artID > 0 {
+		tag := "yklib" + strconv.FormatInt(l.ID, 10)
+		d.ImageTags = map[string]string{"Primary": tag}
+		d.BackdropImageTags = []string{tag}
+		ratio := 1.7777777777777777
+		d.PrimaryImageAspectRatio = &ratio
+	}
+	return d
 }
 
 func (s *Server) libraryEmbyDTOs() ([]embyItemDTO, int, error) {
@@ -225,7 +238,7 @@ func (s *Server) libraryEmbyDTOs() ([]embyItemDTO, int, error) {
 	}
 	out := make([]embyItemDTO, 0, len(libs))
 	for _, l := range libs {
-		out = append(out, embyLibraryDTO(l))
+		out = append(out, s.embyLibraryDTO(l))
 	}
 	return out, len(out), nil
 }
@@ -386,7 +399,7 @@ func (s *Server) handleEmbyItem(w http.ResponseWriter, r *http.Request) {
 			writeErr(w, http.StatusNotFound, "item not found")
 			return
 		}
-		writeJSON(w, http.StatusOK, embyLibraryDTO(*lib))
+		writeJSON(w, http.StatusOK, s.embyLibraryDTO(*lib))
 		return
 	}
 	it, err := s.st.GetItem(id)
@@ -439,6 +452,18 @@ func (s *Server) handleEmbyImage(w http.ResponseWriter, r *http.Request) {
 		kind = "backdrop"
 	default:
 		writeErr(w, http.StatusNotFound, "unknown image type")
+		return
+	}
+	// A CollectionFolder id serves the library's representative
+	// artwork (the newest item's backdrop) for every image type —
+	// client home screens render library tiles in landscape.
+	if id >= embyLibraryIDOffset {
+		artID, err := s.st.LibraryArtworkItem(id - embyLibraryIDOffset)
+		if err != nil || artID == 0 {
+			writeErr(w, http.StatusNotFound, "no such image")
+			return
+		}
+		s.serveItemImageW(w, r, artID, "backdrop", parseEmbyWidth(r))
 		return
 	}
 	s.serveItemImageW(w, r, id, kind, parseEmbyWidth(r))
