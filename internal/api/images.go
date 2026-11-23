@@ -133,7 +133,11 @@ func (s *Server) localImageFile(id int64, kind string) string {
 //     lazy TMDB fetch) — cached once under the series, shared by all
 //     of its episodes.
 func (s *Server) resolveEpisodeImage(it *store.Item, kind string) string {
-	if it.Type == "episode" && kind == "backdrop" {
+	// An episode's own face is its still, for backdrop AND for
+	// Primary: clients like SenPlayer list episodes by Primary, and
+	// falling straight through to the series poster makes every
+	// episode in a season wear the same cover.
+	if it.Type == "episode" && (kind == "backdrop" || kind == "poster") {
 		if p := s.lazyEpisodeStill(it); p != "" {
 			return p
 		}
