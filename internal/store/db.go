@@ -67,6 +67,25 @@ func Open(path string) (*Store, error) {
 			return nil, fmt.Errorf("migrate user_data last_played_at: %w", err)
 		}
 	}
+	// Migration: items gained date_added (newest source-file mtime, used
+	// by the "latest additions" ordering). The companion index can only be
+	// created once the column exists, so it lives here, not in the schema.
+	has, err = columnExists(db, "items", "date_added")
+	if err != nil {
+		db.Close()
+		return nil, fmt.Errorf("migrate items: %w", err)
+	}
+	if !has {
+		if _, err := db.Exec(`ALTER TABLE items ADD COLUMN date_added INTEGER NOT NULL DEFAULT 0`); err != nil {
+			db.Close()
+			return nil, fmt.Errorf("migrate items date_added: %w", err)
+		}
+	}
+	if _, err := db.Exec(`CREATE INDEX IF NOT EXISTS idx_items_lib_added
+		ON items(library_id, date_added DESC, id DESC)`); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("migrate items date_added index: %w", err)
+	}
 	// Migration: images gained pixel dimensions (hero quality tiers).
 	for _, col := range []string{"width", "height"} {
 		has, err := columnExists(db, "images", col)
@@ -149,7 +168,8 @@ CREATE TABLE IF NOT EXISTS items (
   sort_title     TEXT NOT NULL DEFAULT '',
   fingerprint    TEXT NOT NULL DEFAULT '',
   created_at     INTEGER NOT NULL DEFAULT 0, -- unix seconds
-  updated_at     INTEGER NOT NULL DEFAULT 0
+  updated_at     INTEGER NOT NULL DEFAULT 0,
+  date_added     INTEGER NOT NULL DEFAULT 0  -- unix seconds: newest mtime of the item's own files (0 = not yet backfilled)
 );
 CREATE INDEX IF NOT EXISTS idx_items_parent ON items(parent_id);
 CREATE INDEX IF NOT EXISTS idx_items_series ON items(series_id, season_num, episode_num);

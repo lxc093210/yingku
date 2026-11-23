@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"yingku/internal/store"
 )
@@ -497,5 +498,98 @@ func TestScanSeriesFolderRootNoTvNFO(t *testing.T) {
 	if series.Type != "series" || series.TmdbID != 333 || series.Title != "无NFO剧集" || series.Year != 2022 {
 		t.Errorf("series = type %q tmdb %d title %q year %d",
 			series.Type, series.TmdbID, series.Title, series.Year)
+	}
+}
+
+func TestScanDateAddedBackfill(t *testing.T) {
+	// Copy fixtures to a temp tree (copies reset mtimes, so pin them after).
+	src := fixturesRoot(t)
+	dst := filepath.Join(t.TempDir(), "library")
+	if err := filepath.Walk(src, func(p string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		rel, _ := filepath.Rel(src, p)
+		target := filepath.Join(dst, rel)
+		if info.IsDir() {
+			return os.MkdirAll(target, 0o755)
+		}
+		raw, err := os.ReadFile(p)
+		if err != nil {
+			return err
+		}
+		return os.WriteFile(target, raw, 0o644)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	movieDir := filepath.Join(dst, "电影", "动画电影", "蜘蛛侠：平行宇宙 (2018) {tmdbid-324857}")
+	stem := "蜘蛛侠：平行宇宙.2018.BluRay.REMUX.2160p.H.265.TrueHD 7.1.DV HDR.10bit.24fps"
+	pin := func(name string, unixSec int64) {
+		mt := time.Unix(unixSec, 0)
+		if err := os.Chtimes(filepath.Join(movieDir, name), mt, mt); err != nil {
+			t.Fatal(err)
+		}
+	}
+	pin(stem+".strm", 1600000000)
+	pin(stem+"-mediainfo.json", 1600000000)
+	pin(stem+".nfo", 1700000000)  // newest of the item's own files
+	pin("poster.jpg", 1800000000) // images do not count for a movie
+
+	st := openTemp(t)
+	sc := New(st)
+	if err := sc.Scan(dst); err != nil {
+		t.Fatal(err)
+	}
+	libs, _ := st.ListLibraries()
+	var movieLib *store.Library
+	for i := range libs {
+		if libs[i].Kind == "movie" {
+			movieLib = &libs[i]
+		}
+	}
+	items, _, err := st.ListTopLevel(movieLib.ID, "title", "", 60)
+	if err != nil || len(items) != 1 {
+		t.Fatalf("movie items = %v, err %v", len(items), err)
+	}
+	movie := items[0]
+	if movie.DateAdded != 1700000000 {
+		t.Errorf("movie date_added = %d, want 1700000000 (newest strm/nfo/mediainfo mtime)", movie.DateAdded)
+	}
+	// Series and episodes carry a backfilled date_added too.
+	series, err := st.GetItemByPath(filepath.Join(dst, "电视剧", "国产剧", "上海女子图鉴 (2018) {tmdbid-80607}"))
+	if err != nil || series == nil {
+		t.Fatalf("series = %v, err %v", series, err)
+	}
+	if series.DateAdded <= 0 {
+		t.Errorf("series date_added = %d, want > 0", series.DateAdded)
+	}
+	seasons, _ := st.Children(series.ID)
+	eps, _ := st.Children(seasons[0].ID)
+	if len(eps) == 0 || eps[0].DateAdded <= 0 {
+		t.Errorf("episode date_added = %v, want > 0", eps)
+	}
+
+	// Legacy rows (date_added = 0) are reprocessed once even though the
+	// fingerprints are unchanged; afterwards scans skip everything again.
+	if _, err := st.DB().Exec(`UPDATE items SET date_added = 0`); err != nil {
+		t.Fatal(err)
+	}
+	sc2 := New(st)
+	if err := sc2.Scan(dst); err != nil {
+		t.Fatal(err)
+	}
+	if got := sc2.Status().Items; got != 23 {
+		t.Errorf("backfill rescan items = %d, want 23 (all reprocessed)", got)
+	}
+	movie2, _ := st.GetItem(movie.ID)
+	if movie2.DateAdded != 1700000000 {
+		t.Errorf("backfilled date_added = %d, want 1700000000", movie2.DateAdded)
+	}
+	sc3 := New(st)
+	if err := sc3.Scan(dst); err != nil {
+		t.Fatal(err)
+	}
+	if st3 := sc3.Status(); st3.Items != 0 || st3.Skipped != 23 {
+		t.Errorf("post-backfill rescan items/skipped = %d/%d, want 0/23", st3.Items, st3.Skipped)
 	}
 }

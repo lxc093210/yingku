@@ -418,3 +418,184 @@ func TestLibraryPathsMigration(t *testing.T) {
 		t.Fatalf("migrated libraries = %+v", libs)
 	}
 }
+
+func TestDateAddedMigration(t *testing.T) {
+	// Simulate a pre-date_added database: items without the column.
+	path := filepath.Join(t.TempDir(), "old.db")
+	db, err := sql.Open("sqlite", "file:"+path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`CREATE TABLE items (
+		id INTEGER PRIMARY KEY, library_id INTEGER NOT NULL DEFAULT 0,
+		type TEXT NOT NULL DEFAULT '', parent_id INTEGER, series_id INTEGER,
+		season_num INTEGER, episode_num INTEGER,
+		title TEXT NOT NULL DEFAULT '', original_title TEXT NOT NULL DEFAULT '',
+		year INTEGER NOT NULL DEFAULT 0, overview TEXT NOT NULL DEFAULT '',
+		rating REAL NOT NULL DEFAULT 0, runtime_min INTEGER NOT NULL DEFAULT 0,
+		genres TEXT NOT NULL DEFAULT '[]', tmdb_id INTEGER NOT NULL DEFAULT 0,
+		path TEXT NOT NULL UNIQUE, sort_title TEXT NOT NULL DEFAULT '',
+		fingerprint TEXT NOT NULL DEFAULT '',
+		created_at INTEGER NOT NULL DEFAULT 0, updated_at INTEGER NOT NULL DEFAULT 0)`,
+	); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`INSERT INTO items(library_id, type, title, path, sort_title)
+		VALUES (1, 'movie', 'Legacy', '/legacy/film', 'Legacy')`); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+	st, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	has, err := columnExists(st.DB(), "items", "date_added")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !has {
+		t.Fatal("items.date_added missing after migration")
+	}
+	it, err := st.GetItemByPath("/legacy/film")
+	if err != nil || it == nil {
+		t.Fatalf("legacy item = %v, err %v", it, err)
+	}
+	if it.DateAdded != 0 {
+		t.Errorf("legacy date_added = %d, want 0 (backfill marker)", it.DateAdded)
+	}
+	// Reopening stays clean (idempotent).
+	if err := st.Close(); err != nil {
+		t.Fatal(err)
+	}
+	st2, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	st2.Close()
+}
+
+func TestListTopLevelAddedSort(t *testing.T) {
+	st := openTempStore(t)
+	libID, err := st.CreateLibrary("最新库", "movie", []string{"/added"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	insert := func(path string, added int64) {
+		tx, err := st.Begin()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := tx.UpsertItem(&Item{
+			LibraryID: libID, Type: "movie", Path: path,
+			Title: path, SortTitle: path, DateAdded: added,
+		}); err != nil {
+			t.Fatal(err)
+		}
+		if err := tx.Commit(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	insert("/added/a", 100)
+	insert("/added/b", 300)
+	insert("/added/c", 200)
+	insert("/added/d", 300) // ties with b: the later id wins (id DESC)
+	insert("/added/e", 0)
+
+	want := []string{"/added/d", "/added/b", "/added/c", "/added/a", "/added/e"}
+	var got []string
+	cursor := ""
+	for {
+		items, next, err := st.ListTopLevel(libID, "added", cursor, 2)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, it := range items {
+			got = append(got, it.Path)
+		}
+		if next == "" {
+			break
+		}
+		cursor = next
+	}
+	if len(got) != len(want) {
+		t.Fatalf("added order = %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("added order = %v, want %v", got, want)
+		}
+	}
+}
+
+func TestFavoritesAndThumbs(t *testing.T) {
+	st := openTempStore(t)
+	libID, err := st.CreateLibrary("收藏库", "mixed", []string{"/fav"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	mk := func(typ, path string, rating float64, backdrop bool, parent *int64) int64 {
+		tx, err := st.Begin()
+		if err != nil {
+			t.Fatal(err)
+		}
+		id, err := tx.UpsertItem(&Item{
+			LibraryID: libID, Type: typ, Path: path, ParentID: parent,
+			Title: path, SortTitle: path, Rating: rating,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if backdrop {
+			if err := tx.ReplaceImages(id, map[string]ImageFile{"backdrop": {Path: "/img/b.jpg"}}); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if err := tx.Commit(); err != nil {
+			t.Fatal(err)
+		}
+		return id
+	}
+	m1 := mk("movie", "/fav/m1", 9.0, true, nil)
+	m2 := mk("movie", "/fav/m2", 8.0, true, nil)
+	mk("movie", "/fav/m3", 7.0, true, nil)
+	mk("movie", "/fav/m4", 6.0, true, nil)
+	mk("movie", "/fav/nb", 9.9, false, nil) // top rating but no backdrop
+	s1 := mk("series", "/fav/s1", 8.5, true, nil)
+	ep := mk("episode", "/fav/s1/e1", 0, false, &s1)
+
+	// Favorites: top-level only (the favorited episode stays out).
+	for _, id := range []int64{m2, s1, ep} {
+		if err := st.SetFavorite(id, 1, true); err != nil {
+			t.Fatal(err)
+		}
+	}
+	favs, err := st.Favorites(1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(favs) != 2 || favs[0].ID != m2 || favs[1].ID != s1 {
+		t.Fatalf("favorites = %+v, want [m2 s1]", favs)
+	}
+	if favs, _ := st.Favorites(2); len(favs) != 0 {
+		t.Errorf("other user's favorites = %d, want 0", len(favs))
+	}
+
+	// Thumbs: rating order, backdrop required, capped at 3.
+	thumbs, err := st.LibraryThumbs()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := thumbs[libID]
+	want := []int64{m1, s1, m2}
+	if len(got) != len(want) {
+		t.Fatalf("thumbs = %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("thumbs = %v, want %v", got, want)
+		}
+	}
+}

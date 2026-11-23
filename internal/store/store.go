@@ -44,6 +44,7 @@ type Item struct {
 	Fingerprint   string
 	CreatedAt     int64
 	UpdatedAt     int64
+	DateAdded     int64 // unix seconds: newest mtime of the item's own files; 0 = not backfilled yet
 	HasPoster     bool
 	HasBackdrop   bool
 }
@@ -74,7 +75,8 @@ const itemCols = `id, library_id, type, parent_id, series_id, season_num, episod
 	title, original_title, year, overview, rating, runtime_min, genres, tmdb_id,
 	path, sort_title, fingerprint, created_at, updated_at,
 	EXISTS(SELECT 1 FROM images WHERE item_id = items.id AND kind = 'poster'),
-	EXISTS(SELECT 1 FROM images WHERE item_id = items.id AND kind = 'backdrop')`
+	EXISTS(SELECT 1 FROM images WHERE item_id = items.id AND kind = 'backdrop'),
+	date_added`
 
 func scanItem(sc interface{ Scan(...any) error }) (*Item, error) {
 	return scanItemX(sc)
@@ -91,7 +93,7 @@ func scanItemX(sc interface{ Scan(...any) error }, extra ...any) (*Item, error) 
 		&seasonNum, &episodeNum, &it.Title, &it.OriginalTitle, &it.Year,
 		&it.Overview, &it.Rating, &it.RuntimeMin, &genres, &it.TmdbID, &it.Path,
 		&it.SortTitle, &it.Fingerprint, &it.CreatedAt, &it.UpdatedAt,
-		&hasPoster, &hasBackdrop}
+		&hasPoster, &hasBackdrop, &it.DateAdded}
 	err := sc.Scan(append(dests, extra...)...)
 	if err != nil {
 		return nil, err
@@ -267,8 +269,8 @@ func (t *Tx) UpsertItem(it *Item) (int64, error) {
 	err := t.tx.QueryRow(`
 		INSERT INTO items(library_id, type, parent_id, series_id, season_num, episode_num,
 			title, original_title, year, overview, rating, runtime_min, genres,
-			tmdb_id, path, sort_title, fingerprint, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			tmdb_id, path, sort_title, fingerprint, created_at, updated_at, date_added)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(path) DO UPDATE SET
 			library_id = excluded.library_id, type = excluded.type,
 			parent_id = excluded.parent_id, series_id = excluded.series_id,
@@ -278,12 +280,12 @@ func (t *Tx) UpsertItem(it *Item) (int64, error) {
 			rating = excluded.rating, runtime_min = excluded.runtime_min,
 			genres = excluded.genres, tmdb_id = excluded.tmdb_id,
 			sort_title = excluded.sort_title, fingerprint = excluded.fingerprint,
-			updated_at = excluded.updated_at
+			updated_at = excluded.updated_at, date_added = excluded.date_added
 		RETURNING id`,
 		it.LibraryID, it.Type, it.ParentID, it.SeriesID, it.SeasonNum, it.EpisodeNum,
 		it.Title, it.OriginalTitle, it.Year, it.Overview, it.Rating, it.RuntimeMin,
 		string(genres), it.TmdbID, it.Path, it.SortTitle, it.Fingerprint,
-		it.CreatedAt, it.UpdatedAt).Scan(&id)
+		it.CreatedAt, it.UpdatedAt, it.DateAdded).Scan(&id)
 	return id, err
 }
 
@@ -496,7 +498,7 @@ func decodeCursor(c string) (cursorKey, error) {
 }
 
 // ListTopLevel returns one keyset page of a library's top-level items
-// (movies or series). sort: "title" | "year" | "rating".
+// (movies or series). sort: "title" | "year" | "rating" | "added".
 func (s *Store) ListTopLevel(libraryID int64, sort, cursor string, limit int) ([]*Item, string, error) {
 	if limit <= 0 || limit > 200 {
 		limit = 60
@@ -510,6 +512,14 @@ func (s *Store) ListTopLevel(libraryID int64, sort, cursor string, limit int) ([
 	var args []any
 	args = append(args, libraryID)
 	switch sort {
+	case "added":
+		// Newest additions first; date_added is a unix-second timestamp,
+		// carried in the cursor's float slot (exact for any realistic date).
+		order = `date_added DESC, id DESC`
+		if cursor != "" {
+			where = ` AND (date_added < ? OR (date_added = ? AND id < ?))`
+			args = append(args, int64(ck.F), int64(ck.F), ck.ID)
+		}
 	case "year":
 		order = `year DESC, id ASC`
 		if cursor != "" {
@@ -564,6 +574,9 @@ func (s *Store) ListTopLevel(libraryID int64, sort, cursor string, limit int) ([
 		next = encodeCursor(cursorKey{K: last.SortTitle, F: float64(max(last.Year, 0)), ID: last.ID})
 		if sort == "rating" {
 			next = encodeCursor(cursorKey{F: last.Rating, ID: last.ID})
+		}
+		if sort == "added" {
+			next = encodeCursor(cursorKey{F: float64(last.DateAdded), ID: last.ID})
 		}
 	}
 	return out, next, nil
@@ -1008,11 +1021,67 @@ func boolInt(b bool) int {
 	return 0
 }
 
+// Favorites returns the user's favorited top-level items (movies and
+// series), ordered by title for the favorites view.
+func (s *Store) Favorites(userID int64) ([]*Item, error) {
+	rows, err := s.db.Query(`SELECT `+itemCols+` FROM items
+		JOIN user_data ud ON ud.item_id = items.id AND ud.user_id = ?
+		WHERE ud.favorite = 1 AND items.parent_id IS NULL
+		ORDER BY items.sort_title ASC, items.id ASC`, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []*Item
+	for rows.Next() {
+		it, err := scanItem(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, it)
+	}
+	return out, rows.Err()
+}
+
+// LibraryThumbs returns, per library, up to three top-level item ids that
+// have a backdrop (highest rated first) for the home page's library cards.
+// One window-function query covers all libraries; no per-library scans.
+func (s *Store) LibraryThumbs() (map[int64][]int64, error) {
+	rows, err := s.db.Query(`
+		SELECT library_id, item_id FROM (
+			SELECT i.library_id AS library_id, i.id AS item_id,
+				ROW_NUMBER() OVER (
+					PARTITION BY i.library_id
+					ORDER BY i.rating DESC, i.id ASC
+				) AS rn
+			FROM items i
+			WHERE i.parent_id IS NULL
+			  AND EXISTS(SELECT 1 FROM images WHERE item_id = i.id AND kind = 'backdrop')
+		) WHERE rn <= 3
+		ORDER BY library_id, rn`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[int64][]int64{}
+	for rows.Next() {
+		var libID, itemID int64
+		if err := rows.Scan(&libID, &itemID); err != nil {
+			return nil, err
+		}
+		out[libID] = append(out[libID], itemID)
+	}
+	return out, rows.Err()
+}
+
 // ContinueEntry is a partially watched movie/episode for the home page.
 type ContinueEntry struct {
 	Item          *Item
 	ProgressTicks int64
 	SeriesName    string // set for episodes
+	SeasonNumber  *int   // episodes only
+	EpisodeNumber *int   // episodes only
+	EpisodeName   string // episodes only: the episode's own title
 }
 
 // ContinueWatching lists in-progress (started, not finished) movies and
@@ -1040,7 +1109,13 @@ func (s *Store) ContinueWatching(userID int64, limit int) ([]ContinueEntry, erro
 		if err != nil {
 			return nil, err
 		}
-		out = append(out, ContinueEntry{Item: it, ProgressTicks: ticks, SeriesName: seriesName})
+		e := ContinueEntry{Item: it, ProgressTicks: ticks, SeriesName: seriesName}
+		if it.Type == "episode" {
+			e.SeasonNumber = it.SeasonNum
+			e.EpisodeNumber = it.EpisodeNum
+			e.EpisodeName = it.Title
+		}
+		out = append(out, e)
 	}
 	return out, rows.Err()
 }
@@ -1077,12 +1152,13 @@ func (s *Store) FirstPlayableInSeason(seasonID int64) (*Item, error) {
 type IndexEntry struct {
 	ID          int64
 	Fingerprint string
+	DateAdded   int64 // 0 marks a legacy row that still needs its date_added backfilled
 }
 
 // LoadIndex streams (path -> id/fingerprint) for one library so the scanner
 // can resolve parents and skip unchanged items without extra queries.
 func (s *Store) LoadIndex(libraryID int64) (map[string]IndexEntry, error) {
-	rows, err := s.db.Query(`SELECT path, id, fingerprint FROM items WHERE library_id = ?`, libraryID)
+	rows, err := s.db.Query(`SELECT path, id, fingerprint, date_added FROM items WHERE library_id = ?`, libraryID)
 	if err != nil {
 		return nil, err
 	}
@@ -1090,11 +1166,11 @@ func (s *Store) LoadIndex(libraryID int64) (map[string]IndexEntry, error) {
 	out := map[string]IndexEntry{}
 	for rows.Next() {
 		var p, fp string
-		var id int64
-		if err := rows.Scan(&p, &id, &fp); err != nil {
+		var id, added int64
+		if err := rows.Scan(&p, &id, &fp, &added); err != nil {
 			return nil, err
 		}
-		out[p] = IndexEntry{ID: id, Fingerprint: fp}
+		out[p] = IndexEntry{ID: id, Fingerprint: fp, DateAdded: added}
 	}
 	return out, rows.Err()
 }

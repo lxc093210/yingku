@@ -172,3 +172,78 @@ func itoa(v int64) string {
 func queryEscape(s string) string {
 	return url.QueryEscape(s)
 }
+
+func TestFavoritesEndpointAndHomeThumbs(t *testing.T) {
+	h := testHandler(t)
+	movieID, seriesID := fixtureIDs(t, h)
+
+	// Favorites start empty.
+	var favs struct {
+		Items []itemDTO `json:"Items"`
+	}
+	if code := get(t, h, "/api/favorites", &favs); code != 200 || len(favs.Items) != 0 {
+		t.Fatalf("favorites empty = %d %+v", code, favs)
+	}
+	if code, body := doReq(t, h, http.MethodPost, "/api/items/"+itoa(movieID)+"/favorite", `{"favorite":true}`); code != 200 {
+		t.Fatalf("favorite post = %d %s", code, body)
+	}
+	if code, body := doReq(t, h, http.MethodPost, "/api/items/"+itoa(seriesID)+"/favorite", `{"favorite":true}`); code != 200 {
+		t.Fatalf("favorite series post = %d %s", code, body)
+	}
+	if code := get(t, h, "/api/favorites", &favs); code != 200 || len(favs.Items) != 2 {
+		t.Fatalf("favorites = %d %+v", code, favs)
+	}
+
+	// Home: library cards carry Thumbs. The movie owns the fixture's only
+	// backdrop art; the series fixture folder has none.
+	var home struct {
+		Libraries        []libraryDTO `json:"Libraries"`
+		ContinueWatching []itemDTO    `json:"ContinueWatching"`
+	}
+	if code := get(t, h, "/api/home", &home); code != 200 {
+		t.Fatalf("home = %d", code)
+	}
+	var movieLibID int64
+	for _, l := range home.Libraries {
+		if l.Kind == "movie" {
+			movieLibID = l.ID
+			if len(l.Thumbs) != 1 || l.Thumbs[0] != movieID {
+				t.Errorf("movie thumbs = %v, want [%d]", l.Thumbs, movieID)
+			}
+		} else if len(l.Thumbs) != 0 {
+			t.Errorf("series thumbs = %v, want none (fixture has no backdrop)", l.Thumbs)
+		}
+	}
+
+	// sort=added serves the library page.
+	var page struct {
+		Items []itemDTO `json:"Items"`
+	}
+	if code := get(t, h, "/api/libraries/"+itoa(movieLibID)+"/items?sort=added", &page); code != 200 ||
+		len(page.Items) != 1 || page.Items[0].ID != movieID {
+		t.Fatalf("sort=added page = %d %+v", code, page)
+	}
+
+	// ContinueWatching episode entries carry season/episode/name fields.
+	var info playInfoDTO
+	if code := get(t, h, "/api/items/"+itoa(seriesID)+"/play-info", &info); code != 200 || info.ItemID == 0 {
+		t.Fatalf("play-info = %d %+v", code, info)
+	}
+	if code, body := doReq(t, h, http.MethodPost, "/api/items/"+itoa(info.ItemID)+"/progress",
+		`{"positionSeconds":600,"durationSeconds":3600}`); code != 200 {
+		t.Fatalf("episode progress = %d %s", code, body)
+	}
+	if code := get(t, h, "/api/home", &home); code != 200 {
+		t.Fatalf("home after progress = %d", code)
+	}
+	if len(home.ContinueWatching) != 1 {
+		t.Fatalf("continue watching = %+v", home.ContinueWatching)
+	}
+	cw := home.ContinueWatching[0]
+	if cw.SeriesName != "上海女子图鉴" || cw.EpisodeName == "" {
+		t.Errorf("cw series/episode name = %q/%q", cw.SeriesName, cw.EpisodeName)
+	}
+	if cw.SeasonNumber == nil || *cw.SeasonNumber != 1 || cw.EpisodeNumber == nil || *cw.EpisodeNumber != 1 {
+		t.Errorf("cw S/E = %v/%v, want 1/1", cw.SeasonNumber, cw.EpisodeNumber)
+	}
+}

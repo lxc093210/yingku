@@ -576,7 +576,7 @@ func (s *Scanner) writeOne(w *writer, index map[string]store.IndexEntry, seen ma
 			return 0, err
 		}
 	}
-	index[p.item.Path] = store.IndexEntry{ID: id, Fingerprint: p.item.Fingerprint}
+	index[p.item.Path] = store.IndexEntry{ID: id, Fingerprint: p.item.Fingerprint, DateAdded: p.item.DateAdded}
 	seen[p.item.Path] = struct{}{}
 	s.bump(func(st *Status) {
 		st.Items++
@@ -598,8 +598,11 @@ func (s *Scanner) processMovieFolder(w *writer, index map[string]store.IndexEntr
 	if len(strms) == 0 {
 		return nil
 	}
-	fp := fingerprint(strms, sidecarsOf(strms))
-	if ex, ok := index[ctx.itemDir]; ok && ex.Fingerprint == fp {
+	sidecars := sidecarsOf(strms)
+	fp := fingerprint(strms, sidecars)
+	// A stored date_added of 0 marks a legacy row: reprocess once even
+	// when the fingerprint is unchanged so the backfill lands.
+	if ex, ok := index[ctx.itemDir]; ok && ex.Fingerprint == fp && ex.DateAdded > 0 {
 		s.skip(seen, ctx.itemDir)
 		return nil
 	}
@@ -608,6 +611,7 @@ func (s *Scanner) processMovieFolder(w *writer, index map[string]store.IndexEntr
 		LibraryID: libID, Type: "movie", Path: ctx.itemDir,
 		Title: fi.Title, Year: fi.Year, TmdbID: fi.Tmdb,
 		SortTitle: fi.Title, Fingerprint: fp, CreatedAt: now, UpdatedAt: now,
+		DateAdded: maxMtime(append(append([]string{}, strms...), sidecars...)),
 	}
 	var firstMI meta.MediaInfo
 	nfo := parseSiblingNFO(strms[0])
@@ -655,6 +659,7 @@ func (s *Scanner) processSeriesFolder(w *writer, index map[string]store.IndexEnt
 		LibraryID: libID, Type: "series", Path: ctx.itemDir,
 		Title: fi.Title, Year: fi.Year, TmdbID: fi.Tmdb,
 		SortTitle: fi.Title, CreatedAt: now, UpdatedAt: now,
+		DateAdded: maxMtime(ctx.files),
 	}
 	tvNFO := findNamed(ctx.files, "tvshow.nfo")
 	fpFiles := []string{}
@@ -663,7 +668,7 @@ func (s *Scanner) processSeriesFolder(w *writer, index map[string]store.IndexEnt
 	}
 	series.Fingerprint = fingerprint(fpFiles, nil)
 	var seriesID int64
-	if ex, ok := index[ctx.itemDir]; ok && ex.Fingerprint == series.Fingerprint {
+	if ex, ok := index[ctx.itemDir]; ok && ex.Fingerprint == series.Fingerprint && ex.DateAdded > 0 {
 		s.skip(seen, ctx.itemDir)
 		seriesID = ex.ID
 	} else {
@@ -702,7 +707,7 @@ func (s *Scanner) processSeriesFolder(w *writer, index map[string]store.IndexEnt
 			LibraryID: libID, Type: "season", Path: path,
 			ParentID: &seriesID, SeriesID: &seriesID, SeasonNum: &num,
 			Title: fmt.Sprintf("季 %d", num), SortTitle: fmt.Sprintf("季 %d", num),
-			CreatedAt: now, UpdatedAt: now,
+			CreatedAt: now, UpdatedAt: now, DateAdded: maxMtime(files),
 		}
 		fpF := []string{}
 		if dirPath != "" {
@@ -719,7 +724,7 @@ func (s *Scanner) processSeriesFolder(w *writer, index map[string]store.IndexEnt
 			}
 		}
 		st.Fingerprint = fingerprint(fpF, nil)
-		if ex, ok := index[path]; ok && ex.Fingerprint == st.Fingerprint {
+		if ex, ok := index[path]; ok && ex.Fingerprint == st.Fingerprint && ex.DateAdded > 0 {
 			s.skip(seen, path)
 			seasonIDs[num] = ex.ID
 			seasonPaths[num] = path
@@ -779,7 +784,7 @@ func (s *Scanner) processSeriesFolder(w *writer, index map[string]store.IndexEnt
 
 func (s *Scanner) processEpisode(w *writer, index map[string]store.IndexEntry, seen map[string]struct{}, libID, seriesID, seasonID int64, seasonNum int, strm string, siblings []string, now int64) error {
 	fp := fingerprint([]string{strm}, sidecarsOf([]string{strm}))
-	if ex, ok := index[strm]; ok && ex.Fingerprint == fp {
+	if ex, ok := index[strm]; ok && ex.Fingerprint == fp && ex.DateAdded > 0 {
 		s.skip(seen, strm)
 		return nil
 	}
@@ -789,6 +794,7 @@ func (s *Scanner) processEpisode(w *writer, index map[string]store.IndexEntry, s
 		ParentID: &seasonID, SeriesID: &seriesID,
 		Title: episodeTitleFallback(strm), Fingerprint: fp,
 		CreatedAt: now, UpdatedAt: now,
+		DateAdded: maxMtime(sameStemFiles(siblings, strm)),
 	}
 	sn, en := seasonNum, epFromName
 	epNFO := parseSiblingNFO(strm)
@@ -904,6 +910,33 @@ func fingerprint(primary, extra []string) string {
 		fmt.Fprintf(h, "%s|%d|%d\n", filepath.Base(f), st.Size(), st.ModTime().UnixNano())
 	}
 	return hex.EncodeToString(h.Sum(nil))
+}
+
+// maxMtime returns the newest modification time (unix seconds) among
+// files; missing files are ignored and 0 means "none found".
+func maxMtime(files []string) int64 {
+	var best int64
+	for _, f := range files {
+		if st, err := os.Stat(f); err == nil {
+			if mt := st.ModTime().Unix(); mt > best {
+				best = mt
+			}
+		}
+	}
+	return best
+}
+
+// sameStemFiles returns the subset of files sharing strm's stem: the
+// .strm itself plus same-stem sidecars (x.nfo, x-mediainfo.json, ...).
+func sameStemFiles(files []string, strm string) []string {
+	stem := strings.TrimSuffix(strm, filepath.Ext(strm))
+	var out []string
+	for _, f := range files {
+		if f == strm || strings.HasPrefix(f, stem+".") || f == stem+"-mediainfo.json" {
+			out = append(out, f)
+		}
+	}
+	return out
 }
 
 // readStrm returns the first line of a .strm file (the target URL, verbatim).

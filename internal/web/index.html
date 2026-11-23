@@ -8,8 +8,8 @@
   :root{
     --bg:#0B0B0D; --panel:#16181B; --panel2:#1E2126; --line:#26292F;
     --text:#EDEDEF; --muted:#9BA0A6; --faint:#6B7078;
-    --red:#E50914; --red-dark:#B00610;
-    --radius:12px; --bar-h:62px;
+    --red:#E50914; --red-dark:#B00610; --green:#52B54B;
+    --radius:12px; --bar-h:58px;
   }
   *{box-sizing:border-box}
   html,body{margin:0;padding:0;background:var(--bg);color:var(--text);
@@ -21,56 +21,65 @@
   ::-webkit-scrollbar-thumb{background:#2c2f36;border-radius:6px}
   ::-webkit-scrollbar-track{background:transparent}
 
-  /* ---------- top bar ---------- */
+  /* ---------- top bar (Emby-style) ---------- */
   header{position:fixed;top:0;left:0;right:0;z-index:60;height:var(--bar-h);
-    display:flex;align-items:center;gap:20px;padding:0 4%;
-    background:linear-gradient(180deg,rgba(11,11,13,.88),rgba(11,11,13,.55) 70%,transparent);
-    backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);
-    transition:background .25s}
-  header.scrolled{background:rgba(11,11,13,.96)}
-  .logo{font-size:23px;font-weight:800;letter-spacing:.32em;cursor:pointer;white-space:nowrap}
-  .logo i{font-style:normal;color:var(--red)}
-  nav{display:flex;gap:16px;overflow-x:auto;scrollbar-width:none;flex:0 1 auto}
-  nav::-webkit-scrollbar{display:none}
-  nav a{font-size:14px;color:#d6d8db;white-space:nowrap;padding:6px 2px;cursor:pointer;opacity:.85}
-  nav a:hover{opacity:1;color:#fff}
-  nav a.on{color:#fff;font-weight:600;box-shadow:inset 0 -2px 0 var(--red)}
-  .bar-right{margin-left:auto;display:flex;align-items:center;gap:12px}
-  .searchbox{display:flex;align-items:center;background:rgba(22,24,27,.85);
-    border:1px solid var(--line);border-radius:999px;padding:0 12px;height:36px}
-  .searchbox:focus-within{border-color:#4a4e57}
+    display:grid;grid-template-columns:1fr auto 1fr;align-items:center;padding:0 18px;
+    background:linear-gradient(180deg,rgba(11,11,13,.92),rgba(11,11,13,.75) 75%,rgba(11,11,13,.55));
+    backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px)}
+  header.scrolled{background:rgba(11,11,13,.97)}
+  .bar-left{display:flex;align-items:center;gap:14px;min-width:0}
+  .logo{display:flex;align-items:center;gap:8px;font-size:21px;font-weight:800;
+    letter-spacing:.14em;cursor:pointer;white-space:nowrap;color:#fff}
+  .logo svg{width:21px;height:21px;flex:none}
+  .logo svg path{fill:var(--green)}
+  .tabs{display:flex;background:rgba(255,255,255,.09);border-radius:999px;padding:3px;gap:2px}
+  .tabs button{border:none;background:transparent;color:#cfd2d6;font-size:14px;
+    padding:6px 22px;border-radius:999px;cursor:pointer;white-space:nowrap}
+  .tabs button.on{background:rgba(255,255,255,.24);color:#fff;font-weight:600}
+  .bar-right{display:flex;align-items:center;gap:10px;justify-content:flex-end}
+  .searchbox{display:flex;align-items:center;background:rgba(22,24,27,.9);
+    border:1px solid var(--line);border-radius:999px;padding:0 12px;height:36px;
+    max-width:0;opacity:0;padding-left:0;padding-right:0;border-width:0;overflow:hidden;
+    transition:max-width .25s,opacity .2s,padding .25s}
+  .searchbox.open{max-width:230px;opacity:1;padding:0 12px;border-width:1px}
   .searchbox span{color:var(--muted);font-size:14px;margin-right:6px}
   .searchbox input{background:none;border:none;outline:none;color:var(--text);
-    font-size:14px;width:150px}
+    font-size:14px;width:170px}
   .searchbox input::placeholder{color:var(--faint)}
   .iconbtn{background:rgba(22,24,27,.85);border:1px solid var(--line);color:var(--text);
-    width:36px;height:36px;border-radius:50%;font-size:16px;cursor:pointer;flex:none}
+    width:36px;height:36px;border-radius:50%;font-size:16px;cursor:pointer;flex:none;
+    display:inline-flex;align-items:center;justify-content:center}
   .iconbtn:hover{border-color:#4a4e57}
 
-  main{padding-bottom:70px}
-  .pad{padding-top:calc(var(--bar-h) + 14px)}
+  /* ---------- drawer ---------- */
+  #drawerShade{position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:90;
+    opacity:0;pointer-events:none;transition:opacity .22s}
+  #drawerShade.open{opacity:1;pointer-events:auto}
+  #drawer{position:fixed;top:0;left:0;bottom:0;width:272px;z-index:95;background:#131518;
+    border-right:1px solid var(--line);transform:translateX(-100%);transition:transform .24s;
+    overflow-y:auto;padding:18px 0}
+  #drawer.open{transform:translateX(0)}
+  #drawer .dlogo{display:flex;align-items:center;gap:8px;font-size:19px;font-weight:800;
+    letter-spacing:.14em;padding:2px 20px 16px;color:#fff}
+  #drawer .dlogo svg{width:19px;height:19px}
+  #drawer .dlogo svg path{fill:var(--green)}
+  .dnav a{display:flex;align-items:center;gap:10px;padding:11px 20px;font-size:14.5px;
+    color:#d6d8db;cursor:pointer}
+  .dnav a:hover{background:rgba(255,255,255,.06);color:#fff}
+  .dnav a.on{background:rgba(255,255,255,.09);color:#fff;font-weight:600;
+    box-shadow:inset 3px 0 0 var(--green)}
+  .dnav .dsec{padding:16px 20px 6px;font-size:12px;letter-spacing:.18em;color:var(--faint)}
+  .dnav .ddiv{height:1px;background:var(--line);margin:10px 0}
 
-  /* ---------- hero ---------- */
-  .hero{position:relative;height:clamp(430px,74vh,820px);display:flex;align-items:flex-end;overflow:hidden}
-  .hero img.bg{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;object-position:center 20%;
-    opacity:0;transition:opacity .6s}
-  @media (min-width:1600px){ .hero img.bg{object-position:center 22%} }
-  .hero img.bg.show{opacity:.92}
-  .hero .shade{position:absolute;inset:0;
-    background:linear-gradient(90deg,rgba(11,11,13,.94) 26%,rgba(11,11,13,.45) 58%,rgba(11,11,13,.08)),
-               linear-gradient(0deg,var(--bg) 2%,rgba(11,11,13,.5) 30%,transparent 55%),
-               linear-gradient(180deg,rgba(11,11,13,.5),transparent 30%)}
-  .hero .inner{position:relative;padding:0 4% 54px;max-width:680px;width:100%}
-  .hero .kick{font-size:12px;letter-spacing:.34em;color:#f3f3f4;opacity:.75;margin-bottom:10px}
-  .hero h1{font-size:clamp(30px,4.6vw,56px);line-height:1.12;margin:0 0 6px;font-weight:800}
-  .hero .orig{font-size:15px;color:#cfd2d6;opacity:.8;margin-bottom:14px}
+  main{padding-bottom:70px}
+  .pad{padding-top:calc(var(--bar-h) + 16px)}
+
+  /* ---------- shared bits ---------- */
   .meta{display:flex;flex-wrap:wrap;align-items:center;gap:8px 14px;font-size:13.5px;color:#d8dade}
-  .meta .star{color:var(--red);font-weight:700}
+  .meta .star{color:#ffb020;font-weight:700}
   .meta .badge{border:1px solid rgba(255,255,255,.4);border-radius:4px;
     padding:1px 6px;font-size:11.5px;letter-spacing:.04em}
-  .hero .ov{margin:14px 0 20px;font-size:14.5px;line-height:1.65;color:#e3e5e8;
-    display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden;max-width:560px}
-  .btnrow{display:flex;gap:10px;flex-wrap:wrap}
+  .btnrow{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
   .btn{border:1px solid var(--line);background:var(--panel2);color:var(--text);
     border-radius:8px;padding:10px 20px;font-size:14.5px;cursor:pointer}
   .btn:hover{border-color:#4a4e57}
@@ -81,16 +90,23 @@
   .btn.ghost{background:rgba(30,33,38,.7)}
   .btn:disabled{opacity:.45;cursor:not-allowed}
   .btn.small{padding:6px 13px;font-size:13px}
-  .hero .dots{position:absolute;right:4%;bottom:58px;display:flex;gap:7px;z-index:2}
-  .hero .dots b{width:22px;height:3.5px;border-radius:2px;background:rgba(255,255,255,.35);cursor:pointer}
-  .hero .dots b.on{background:var(--red)}
+  .btn.faved{background:var(--red);border-color:var(--red);color:#fff}
+  .roundbtn{width:44px;height:44px;border-radius:50%;border:1px solid rgba(255,255,255,.35);
+    background:rgba(20,22,25,.65);color:#fff;font-size:17px;cursor:pointer;flex:none;
+    display:inline-flex;align-items:center;justify-content:center}
+  .roundbtn:hover{border-color:#fff}
+  .roundbtn.on{background:var(--green);border-color:var(--green)}
+  .roundbtn.faved{background:var(--red);border-color:var(--red)}
+  .chips{display:flex;gap:8px;flex-wrap:wrap;margin:10px 0}
+  .chip{border:1px solid var(--line);background:var(--panel2);border-radius:999px;
+    padding:3px 11px;font-size:12.5px;color:#d6d8db}
 
-  /* ---------- rows & cards ---------- */
-  .row{margin:30px 0 4px}
+  /* ---------- rows & poster cards ---------- */
+  .row{margin:28px 0 4px}
   .rowhead{display:flex;align-items:baseline;justify-content:space-between;padding:0 4%;margin-bottom:4px}
   .rowhead h2{font-size:19px;margin:0;font-weight:700}
-  .rowhead a{font-size:12.5px;color:var(--muted);cursor:pointer}
-  .rowhead a:hover{color:#fff}
+  .rowhead h2.clickable{cursor:pointer}
+  .rowhead h2.clickable:hover{color:#fff;text-decoration:underline}
   .rail{display:flex;gap:12px;overflow-x:auto;padding:10px 4% 16px;scrollbar-width:none}
   .rail::-webkit-scrollbar{display:none}
   .card{flex:none;width:158px;cursor:pointer}
@@ -102,12 +118,43 @@
     padding:14px;text-align:center;font-size:16.5px;font-weight:700;line-height:1.5;color:rgba(255,255,255,.92)}
   .pwrap .veil{position:absolute;left:0;right:0;bottom:0;z-index:2;padding:22px 9px 8px;font-size:12px;
     background:linear-gradient(0deg,rgba(0,0,0,.82),transparent);opacity:0;transition:opacity .18s}
-  .pwrap .pbar{position:absolute;left:0;right:0;bottom:0;z-index:3;height:4px;background:rgba(255,255,255,.22)}
-  .pwrap .pbar i{display:block;height:100%;background:var(--red)}
   .card:hover .veil{opacity:1}
   .veil .r{color:#ffb3b8;font-weight:700}
   .card .nm{margin-top:8px;font-size:13.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .card .yr{font-size:12px;color:var(--muted)}
+
+  /* ---------- library cards (我的媒体) ---------- */
+  .libgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(308px,1fr));
+    gap:22px 18px;padding:12px 4% 6px}
+  .libcard{cursor:pointer}
+  .lmain{position:relative;width:100%;aspect-ratio:2/1;border-radius:10px;overflow:hidden;
+    background:var(--panel);transition:transform .18s,box-shadow .18s}
+  .libcard:hover .lmain{transform:scale(1.02);box-shadow:0 12px 30px rgba(0,0,0,.55)}
+  .lmain img.lbg{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;opacity:.5}
+  .lmain .lshade{position:absolute;inset:0;
+    background:linear-gradient(90deg,rgba(10,10,12,.88) 30%,rgba(10,10,12,.35) 62%,rgba(10,10,12,.15))}
+  .linfo{position:absolute;left:0;top:0;bottom:0;width:66%;display:flex;flex-direction:column;
+    justify-content:center;padding:0 8px 0 20px;z-index:2}
+  .linfo .lname{font-family:"Songti SC","STSong","Noto Serif SC","SimSun",serif;
+    font-size:clamp(22px,2.2vw,32px);font-weight:700;letter-spacing:.12em;color:#fff;
+    white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .linfo .lkind{margin-top:7px;font-size:11px;letter-spacing:.38em;color:#cfd2d6;opacity:.85}
+  .lstack{position:absolute;top:0;right:0;bottom:0;width:31%;display:flex;flex-direction:column;gap:2px;z-index:1}
+  .lstack img{flex:1;width:100%;min-height:0;object-fit:cover;display:block}
+  .lcap{margin-top:8px;text-align:center;font-size:13.5px;color:#d6d8db}
+
+  /* ---------- continue watching (16:9) ---------- */
+  .ccard{flex:none;width:302px;cursor:pointer}
+  .cwrap{position:relative;width:100%;aspect-ratio:16/9;border-radius:10px;overflow:hidden;
+    background:var(--panel);transition:transform .18s,box-shadow .18s}
+  .ccard:hover .cwrap{transform:scale(1.03);box-shadow:0 12px 30px rgba(0,0,0,.55)}
+  .cwrap img{position:absolute;inset:0;z-index:1;width:100%;height:100%;object-fit:cover;display:block}
+  .cwrap .fb{position:absolute;inset:0;z-index:0;display:flex;align-items:center;justify-content:center;
+    padding:14px;text-align:center;font-size:17px;font-weight:700;color:rgba(255,255,255,.92)}
+  .cwrap .pbar{position:absolute;left:0;right:0;bottom:0;z-index:3;height:4px;background:rgba(255,255,255,.25)}
+  .cwrap .pbar i{display:block;height:100%;background:var(--green)}
+  .ccard .nm{margin-top:8px;font-size:14px;text-align:center;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .ccard .sub{font-size:12.5px;color:var(--muted);text-align:center;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 
   /* ---------- grid view ---------- */
   .gridhead{padding:0 4%;display:flex;align-items:center;gap:14px;flex-wrap:wrap;margin-bottom:8px}
@@ -117,10 +164,84 @@
     border:1px solid var(--line);border-radius:8px;padding:7px 10px;font-size:13.5px;outline:none}
   .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(158px,1fr));gap:20px 14px;padding:12px 4%}
   .grid .card{width:auto}
-  .loadmore{display:block;margin:22px auto 0}
   .empty{padding:60px 4%;text-align:center;color:var(--muted);font-size:15px}
 
-  /* ---------- overlays ---------- */
+  /* ---------- detail page (Emby-style) ---------- */
+  .dback{position:absolute;top:0;left:0;right:0;height:min(78vh,720px);overflow:hidden;z-index:0}
+  .dback img{width:100%;height:100%;object-fit:cover;object-position:center 22%;display:block}
+  .dback .dshade{position:absolute;inset:0;
+    background:linear-gradient(0deg,var(--bg) 3%,rgba(11,11,13,.45) 42%,rgba(11,11,13,.25) 70%,rgba(11,11,13,.45)),
+               linear-gradient(90deg,rgba(11,11,13,.72),transparent 60%)}
+  #view-detail{position:relative}
+  .dwrap{position:relative;z-index:1;padding:calc(var(--bar-h) + 8px) 4% 10px}
+  .dtop{display:flex;gap:10px;margin-bottom:14px}
+  .dmain{display:flex;gap:30px;align-items:flex-start}
+  .dposter{flex:none;width:216px}
+  .dposter .pwrap2{position:relative;width:100%;aspect-ratio:2/3;border-radius:10px;overflow:hidden;
+    background:var(--panel);box-shadow:0 18px 44px rgba(0,0,0,.55)}
+  .dposter img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;display:block;z-index:1}
+  .dposter .fb{position:absolute;inset:0;z-index:0;display:flex;align-items:center;justify-content:center;
+    padding:16px;text-align:center;font-size:19px;font-weight:700;line-height:1.5;color:rgba(255,255,255,.92)}
+  .dinfo{flex:1;min-width:0;padding-top:8px}
+  .dinfo h1{font-size:clamp(27px,3.6vw,44px);line-height:1.15;margin:0 0 4px;font-weight:800}
+  .dinfo .orig{color:#cfd2d6;font-size:15px;opacity:.85;margin-bottom:12px}
+  .dinfo .serieslink{font-size:13.5px;color:var(--muted);margin-bottom:10px}
+  .dinfo .serieslink a{color:#d6d8db;cursor:pointer;text-decoration:underline}
+  .dactions{display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin:18px 0 6px}
+  .dactions .btn.play{padding:11px 30px;font-size:15px}
+  .dresume{margin:14px 0 4px;max-width:520px}
+  .dresume .rline{display:flex;justify-content:space-between;gap:14px;font-size:13.5px;color:#d8dade;margin-bottom:7px}
+  .dresume .rline .left{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .dresume .rline .rem{color:var(--muted);flex:none}
+  .dresume .rbar{height:5px;border-radius:3px;background:rgba(255,255,255,.22);overflow:hidden}
+  .dresume .rbar i{display:block;height:100%;background:var(--green)}
+  .dov{font-size:14.5px;line-height:1.75;color:#e3e5e8;margin:16px 0 4px;max-width:760px}
+  .dov.clamp{display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
+  .ovtoggle{background:none;border:none;color:var(--muted);font-size:13px;cursor:pointer;padding:2px 0}
+  .ovtoggle:hover{color:#fff}
+  .dbody2{position:relative;z-index:1;padding:8px 4% 0}
+  .dsec{font-size:17px;font-weight:700;margin:28px 0 12px}
+  .mi{max-width:760px}
+  .mi .mirow{display:flex;gap:16px;padding:7px 0;border-bottom:1px solid var(--line);font-size:13.5px}
+  .mi .mirow span{width:76px;flex:none;color:var(--muted)}
+  .mi .mirow b{font-weight:600;color:#e6e8eb}
+  .seasonrail{display:flex;gap:14px;overflow-x:auto;padding-bottom:8px;scrollbar-width:none}
+  .seasonrail::-webkit-scrollbar{display:none}
+  .scard{flex:none;width:132px;cursor:pointer}
+  .scard .swrap{position:relative;width:100%;aspect-ratio:2/3;border-radius:9px;overflow:hidden;background:var(--panel)}
+  .scard img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;display:block;z-index:1}
+  .scard .fb{position:absolute;inset:0;z-index:0;display:flex;align-items:center;justify-content:center;
+    padding:10px;text-align:center;font-size:14px;font-weight:700;color:rgba(255,255,255,.92)}
+  .scard .cntbadge{position:absolute;right:6px;bottom:6px;z-index:2;background:rgba(8,8,10,.82);
+    border-radius:5px;padding:2px 7px;font-size:11.5px;color:#fff}
+  .scard .snm{margin-top:7px;font-size:13px;text-align:center;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .scard.on .swrap{box-shadow:0 0 0 2px var(--green)}
+  .eplist{display:flex;flex-direction:column;margin-top:6px}
+  .ep{display:flex;gap:13px;align-items:center;padding:11px 8px;border-bottom:1px solid var(--line);cursor:pointer}
+  .ep:hover{background:var(--panel2)}
+  .ep .no{font-size:16px;color:var(--muted);width:30px;text-align:center;flex:none}
+  .ep .ti{flex:1;min-width:0}
+  .ep .ti .t{font-size:14.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .ep .ti .t .chk{color:var(--green);font-weight:700;margin-left:7px}
+  .ep .ti .s{font-size:12px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:2px}
+  .ep .ti .ebar{height:3.5px;border-radius:2px;background:rgba(255,255,255,.18);margin-top:6px;max-width:340px;overflow:hidden}
+  .ep .ti .ebar i{display:block;height:100%;background:var(--green)}
+  .ep .rt{font-size:12.5px;color:var(--muted);flex:none}
+  .ep .epplay{flex:none;width:34px;height:34px;border-radius:50%;border:1px solid rgba(255,255,255,.35);
+    background:transparent;color:#fff;font-size:12px;cursor:pointer}
+  .ep .epplay:hover{border-color:#fff}
+  .cast{display:flex;gap:16px;overflow-x:auto;padding-bottom:8px;scrollbar-width:none}
+  .cast::-webkit-scrollbar{display:none}
+  .person{flex:none;width:104px}
+  .person .pimg{position:relative;width:100%;aspect-ratio:2/3;border-radius:9px;overflow:hidden;
+    background:var(--panel2);border:1px solid var(--line)}
+  .person .pimg span{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
+    font-size:30px;font-weight:700;color:#cfd2d6}
+  .person .pimg img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;display:block}
+  .person .pn{font-size:12.5px;line-height:1.35;margin-top:7px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .person .pr{font-size:11.5px;color:var(--muted);line-height:1.35;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+
+  /* ---------- overlays (settings etc.) ---------- */
   .overlay{position:fixed;inset:0;z-index:80;background:rgba(5,5,7,.72);
     backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px);
     display:none;align-items:flex-start;justify-content:center;overflow-y:auto;padding:34px 14px}
@@ -129,42 +250,8 @@
     width:100%;max-width:880px;overflow:hidden;box-shadow:0 30px 80px rgba(0,0,0,.6)}
   .sheet.wide{max-width:960px}
   .sheet .x{position:absolute;top:12px;right:12px;z-index:3;background:rgba(11,11,13,.75)}
-  .dhead{position:relative;min-height:320px;display:flex;align-items:flex-end}
-  .dhead img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}
-  .dhead .shade{position:absolute;inset:0;
-    background:linear-gradient(0deg,var(--panel) 4%,rgba(22,24,27,.25) 55%,rgba(22,24,27,.05)),
-               linear-gradient(90deg,rgba(22,24,27,.75),transparent 65%)}
-  .dhead .inner{position:relative;padding:26px 30px;width:100%}
-  .dhead h2{font-size:clamp(24px,3.4vw,38px);margin:0 0 5px;font-weight:800}
-  .dhead .orig{color:#cfd2d6;font-size:14px;opacity:.85}
-  .dbody{padding:6px 30px 30px}
-  .dbody .ov{font-size:14.5px;line-height:1.75;color:#dcdfe3;margin:14px 0}
-  .chips{display:flex;gap:8px;flex-wrap:wrap;margin:10px 0}
-  .chip{border:1px solid var(--line);background:var(--panel2);border-radius:999px;
-    padding:3px 11px;font-size:12.5px;color:#d6d8db}
   .srcline{font-size:13px;color:var(--muted);margin:8px 0 2px}
   .srcline b{color:#d8dade;font-weight:600}
-  .seasont{font-size:16.5px;font-weight:700;margin:24px 0 8px}
-  .eplist{display:flex;flex-direction:column}
-  .ep{display:flex;gap:13px;align-items:center;padding:10px 8px;border-bottom:1px solid var(--line);cursor:pointer}
-  .ep:hover{background:var(--panel2)}
-  .ep .no{font-size:16px;color:var(--muted);width:30px;text-align:center;flex:none}
-  .ep .ti{flex:1;min-width:0}
-  .ep .ti .t{font-size:14.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-  .ep .ti .s{font-size:12px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-  .ep .rt{font-size:12.5px;color:var(--muted);flex:none}
-  .castt{font-size:16.5px;font-weight:700;margin:24px 0 12px}
-  .cast{display:flex;gap:16px;overflow-x:auto;padding-bottom:8px;scrollbar-width:none}
-  .cast::-webkit-scrollbar{display:none}
-  .person{flex:none;width:74px;text-align:center}
-  .person .av{width:58px;height:58px;border-radius:50%;margin:0 auto 6px;overflow:hidden;
-    background:var(--panel2);border:1px solid var(--line);display:flex;align-items:center;justify-content:center;
-    font-size:21px;font-weight:700;color:#cfd2d6}
-  .person .av{position:relative}
-  .person .av img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;display:block}
-  .person .pn{font-size:12.5px;line-height:1.35;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-  .person .pr{font-size:11.5px;color:var(--muted);line-height:1.35;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-  .btn.faved{background:var(--red);border-color:var(--red);color:#fff}
 
   /* ---------- context menu / delete ---------- */
   .ctxmenu{position:fixed;z-index:140;min-width:168px;background:var(--panel2);border:1px solid var(--line);
@@ -235,80 +322,88 @@
 
   #toast{position:fixed;left:50%;bottom:30px;transform:translateX(-50%) translateY(20px);
     background:#23262c;border:1px solid var(--line);color:var(--text);border-radius:10px;
-    padding:11px 20px;font-size:14px;opacity:0;pointer-events:none;transition:.25s;z-index:120;max-width:88vw}
+    padding:11px 20px;font-size:14px;opacity:0;pointer-events:none;transition:.25s;z-index:150;max-width:88vw}
   #toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
 
   @media (max-width:680px){
-    :root{--bar-h:104px}
-    header{flex-wrap:wrap;height:auto;padding:10px 4%;row-gap:8px}
-    nav{order:3;width:100%}
-    .searchbox input{width:110px}
-    .hero{height:auto;min-height:52vh}
-    .hero .inner{padding-bottom:38px}
-    .hero .dots{display:none}
+    header{padding:0 10px;grid-template-columns:auto 1fr auto}
+    .logo{font-size:18px}
+    .logo svg{width:18px;height:18px}
+    .tabs button{padding:5px 13px;font-size:13px}
+    .bar-left{gap:8px}
+    .searchbox.open{max-width:150px}
+    .searchbox input{width:104px}
     .card{width:112px}
+    .ccard{width:238px}
+    .libgrid{grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:16px 12px}
     .grid{grid-template-columns:repeat(auto-fill,minmax(112px,1fr));gap:16px 10px}
-    .dbody,.setbody{padding-left:18px;padding-right:18px}
-    .dhead .inner{padding:20px 18px}
+    .dmain{flex-direction:column;gap:18px}
+    .dposter{width:138px}
+    .dinfo{padding-top:0}
+    .dback{height:52vh}
+    .setbody{padding-left:18px;padding-right:18px}
     .overlay{padding:14px 8px}
+    .scard{width:104px}
+    .person{width:86px}
   }
 </style>
 </head>
 <body>
 <header id="topbar">
-  <div class="logo" id="logo">影库<i>.</i></div>
-  <nav id="libnav"></nav>
+  <div class="bar-left">
+    <button class="iconbtn" id="burger" title="菜单">☰</button>
+    <div class="logo" id="logo"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 2.5 L21 12 L5 21.5 Z"/></svg>影库</div>
+  </div>
+  <div class="tabs">
+    <button id="tabHome" class="on">首页</button>
+    <button id="tabFav">收藏夹</button>
+  </div>
   <div class="bar-right">
-    <label class="searchbox"><span>⌕</span><input id="search" type="text" placeholder="搜索片名…" autocomplete="off"></label>
+    <label class="searchbox" id="searchBox"><span>⌕</span><input id="search" type="text" placeholder="搜索片名…" autocomplete="off"></label>
+    <button class="iconbtn" id="searchBtn" title="搜索">⌕</button>
     <button class="iconbtn" id="gear" title="设置">⚙</button>
   </div>
 </header>
 
+<div id="drawerShade"></div>
+<aside id="drawer">
+  <div class="dlogo"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 2.5 L21 12 L5 21.5 Z"/></svg>影库</div>
+  <nav class="dnav" id="drawerNav"></nav>
+</aside>
+
 <main>
-  <section id="view-home">
-    <div class="hero" id="hero" style="display:none">
-      <img class="bg" id="heroBg" alt="">
-      <div class="shade"></div>
-      <div class="inner">
-        <div class="kick">本 周 主 打</div>
-        <h1 id="heroTitle"></h1>
-        <div class="orig" id="heroOrig"></div>
-        <div class="meta" id="heroMeta"></div>
-        <p class="ov" id="heroOv"></p>
-        <div class="btnrow">
-          <button class="btn play" id="heroPlay">▶ 播放</button>
-          <button class="btn ghost" id="heroFav">＋ 收藏</button>
-          <button class="btn ghost" id="heroInfo">详情</button>
-        </div>
-      </div>
-      <div class="dots" id="heroDots"></div>
-    </div>
-    <div id="rows"></div>
+  <section id="view-home" class="pad">
+    <div id="homeSecs"></div>
     <div class="empty" id="homeEmpty" style="display:none">媒体库还是空的。点右上角 ⚙ 新建媒体库并扫描，或先在设置里触发全库扫描。</div>
+  </section>
+
+  <section id="view-fav" class="pad" style="display:none">
+    <div class="gridhead">
+      <h2>收藏夹</h2><span class="cnt" id="favCount"></span>
+    </div>
+    <div class="grid" id="favGrid"></div>
+    <div class="empty" id="favEmpty" style="display:none">还没有收藏。在海报上右键，或进入详情点 ♥ 收藏。</div>
   </section>
 
   <section id="view-grid" class="pad" style="display:none">
     <div class="gridhead">
       <h2 id="gridTitle"></h2><span class="cnt" id="gridCount"></span>
       <select id="gridSort">
-        <option value="title">按标题</option>
-        <option value="year">按年份</option>
+        <option value="added">最新添加</option>
         <option value="rating">按评分</option>
+        <option value="title">按名称</option>
+        <option value="year">按年份</option>
       </select>
     </div>
     <div class="grid" id="grid"></div>
-    <button class="btn loadmore" id="loadMore" style="display:none">加载更多</button>
+    <div id="gridSentinel" style="height:8px"></div>
     <div class="empty" id="gridEmpty" style="display:none">这里还没有内容。</div>
   </section>
-</main>
 
-<!-- detail overlay -->
-<div class="overlay" id="detailOverlay">
-  <div class="sheet" style="position:relative">
-    <button class="iconbtn x" data-close="detailOverlay">✕</button>
-    <div id="detailContent"></div>
-  </div>
-</div>
+  <section id="view-detail" style="display:none">
+    <div id="detailPage"></div>
+  </section>
+</main>
 
 <!-- settings overlay -->
 <div class="overlay" id="settingsOverlay">
@@ -467,15 +562,20 @@ function hueOf(name) {
   for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) % 360;
   return h;
 }
+function gradFor(name) {
+  const hue = hueOf(name || "");
+  return "linear-gradient(155deg,hsl(" + hue + ",42%,30%),hsl(" + ((hue + 50) % 360) + ",48%,13%))";
+}
+
+/* ---------------- cards ---------------- */
 function makeCard(it) {
   const d = document.createElement("div");
   d.className = "card";
-  const hue = hueOf(it.Name || "");
   let inner = '<div class="pwrap">';
   if (it.HasPoster) {
     inner += '<img loading="lazy" src="/api/items/' + it.Id + '/image/poster" alt="" onerror="this.remove()">';
   }
-  inner += '<div class="fb" style="background:linear-gradient(155deg,hsl(' + hue + ',42%,30%),hsl(' + ((hue + 50) % 360) + ',48%,13%))">' + esc(it.Name) + "</div>";
+  inner += '<div class="fb" style="background:' + gradFor(it.Name) + '">' + esc(it.Name) + "</div>";
   inner += '<div class="veil">' + (it.CommunityRating ? '<span class="r">★ ' + it.CommunityRating.toFixed(1) + "</span> · " : "") + esc(it.Name) + "</div></div>";
   inner += '<div class="nm">' + esc(it.Name) + '</div><div class="yr">' + (it.ProductionYear || "") + (it.Type === "Series" ? " · 剧集" : "") + "</div>";
   d.innerHTML = inner;
@@ -485,142 +585,161 @@ function makeCard(it) {
 }
 function makeContinueCard(it) {
   const d = document.createElement("div");
-  d.className = "card";
-  const hue = hueOf(it.Name || "");
+  d.className = "ccard";
   const pct = (it.PlaybackPositionTicks && it.RunTimeTicks)
     ? Math.min(100, Math.max(1, Math.round(it.PlaybackPositionTicks / it.RunTimeTicks * 100))) : 0;
-  let inner = '<div class="pwrap">';
-  if (it.HasPoster) {
-    inner += '<img loading="lazy" src="/api/items/' + it.Id + '/image/poster" alt="" onerror="this.remove()">';
-  } else if (it.HasBackdrop) {
+  let inner = '<div class="cwrap">';
+  if (it.HasBackdrop) {
     inner += '<img loading="lazy" src="/api/items/' + it.Id + '/image/backdrop" alt="" onerror="this.remove()">';
+  } else if (it.HasPoster) {
+    inner += '<img loading="lazy" src="/api/items/' + it.Id + '/image/poster" alt="" onerror="this.remove()">';
   }
-  inner += '<div class="fb" style="background:linear-gradient(155deg,hsl(' + hue + ',42%,30%),hsl(' + ((hue + 50) % 360) + ',48%,13%))">' + esc(it.Name) + "</div>";
-  inner += '<div class="veil">' + esc(it.Name) + "</div>";
+  inner += '<div class="fb" style="background:' + gradFor(it.SeriesName || it.Name) + '">' + esc(it.SeriesName || it.Name) + "</div>";
   if (pct > 0) inner += '<div class="pbar"><i style="width:' + pct + '%"></i></div>';
   inner += "</div>";
-  inner += '<div class="nm">' + esc(it.SeriesName || it.Name) + '</div><div class="yr">' +
-    (it.SeriesName ? esc(it.Name) + " · " : "") + (pct ? "看到 " + pct + "%" : "") + "</div>";
+  inner += '<div class="nm">' + esc(it.SeriesName || it.Name) + "</div>";
+  let sub = "";
+  if (it.SeriesName) {
+    const sn = it.SeasonNumber != null ? it.SeasonNumber : it.ParentIndexNumber;
+    const en = it.EpisodeNumber != null ? it.EpisodeNumber : it.IndexNumber;
+    const epName = it.EpisodeName || it.Name || "";
+    sub = (sn != null && en != null) ? "S" + sn + ":E" + en + " - " + epName : epName;
+  } else if (it.ProductionYear) {
+    sub = String(it.ProductionYear);
+  }
+  inner += '<div class="sub">' + esc(sub) + "</div>";
   d.innerHTML = inner;
   d.addEventListener("click", () => openPlayer(it.Id));
   d.addEventListener("contextmenu", e => { e.preventDefault(); openCtxMenu(e.clientX, e.clientY, it, d); });
   return d;
 }
-
-/* ---------------- navigation / views ---------------- */
-let LIBS = [];
-function setNav(activeId) {
-  const nav = $("#libnav");
-  nav.innerHTML = "";
-  const home = document.createElement("a");
-  home.textContent = "首页";
-  if (!activeId) home.className = "on";
-  home.addEventListener("click", () => showHome());
-  nav.appendChild(home);
-  LIBS.forEach(l => {
-    const a = document.createElement("a");
-    a.textContent = l.Name;
-    if (l.Id === activeId) a.className = "on";
-    a.addEventListener("click", () => showLibrary(l));
-    nav.appendChild(a);
-  });
-}
-function showView(name) {
-  $("#view-home").style.display = name === "home" ? "" : "none";
-  $("#view-grid").style.display = name === "grid" ? "" : "none";
-  window.scrollTo(0, 0);
-}
-function showHome() { setNav(null); showView("home"); }
-
-/* ---------------- home ---------------- */
-let heroes = [], heroIdx = 0, heroTimer = null;
-function renderHero() {
-  if (!heroes.length) { $("#hero").style.display = "none"; return; }
-  const it = heroes[heroIdx % heroes.length];
-  $("#hero").style.display = "";
-  const bg = $("#heroBg");
-  bg.classList.remove("show");
-  bg.onload = () => bg.classList.add("show");
-  bg.onerror = () => {
-    // Hi-res (TMDB) backdrop failed: fall back to the local backdrop.
-    if (bg.dataset.hi) { bg.dataset.hi = ""; bg.src = "/api/items/" + it.Id + "/image/backdrop"; }
-    else bg.classList.remove("show");
-  };
-  if (it.HasBackdrop) { bg.dataset.hi = "1"; bg.src = "/api/items/" + it.Id + "/image/backdrop-hi"; }
-  else { bg.dataset.hi = ""; bg.removeAttribute("src"); }
-  $("#heroTitle").textContent = it.Name || "";
-  $("#heroOrig").textContent = it.OriginalTitle || "";
-  $("#heroMeta").innerHTML = metaLine(it);
-  $("#heroOv").textContent = it.Overview || "";
-  const hf = $("#heroFav");
-  hf.dataset.fav = "";
-  hf.textContent = "＋ 收藏";
-  hf.classList.remove("faved");
-  $("#heroPlay").onclick = () => openPlayer(it.Id);
-  hf.onclick = () => toggleFavorite(it.Id, hf);
-  $("#heroInfo").onclick = () => openDetail(it.Id);
-  const dots = $("#heroDots");
-  dots.innerHTML = "";
-  heroes.forEach((h, i) => {
-    const b = document.createElement("b");
-    if (i === heroIdx % heroes.length) b.className = "on";
-    b.addEventListener("click", () => { heroIdx = i; renderHero(); restartHeroTimer(); });
-    dots.appendChild(b);
-  });
-}
-function restartHeroTimer() {
-  clearInterval(heroTimer);
-  if (heroes.length > 1) {
-    heroTimer = setInterval(() => { heroIdx = (heroIdx + 1) % heroes.length; renderHero(); }, 7000);
+const KIND_EN = { movie: "MOVIES", series: "TV SHOWS", mixed: "MIXED" };
+function makeLibCard(lib) {
+  const d = document.createElement("div");
+  d.className = "libcard";
+  const thumbs = lib.Thumbs || [];
+  let inner = '<div class="lmain">';
+  if (thumbs.length) {
+    inner += '<img class="lbg" loading="lazy" src="/api/items/' + thumbs[0] + '/image/backdrop" alt="" onerror="this.remove()">';
   }
+  inner += '<div class="lshade" style="' + (thumbs.length ? "" : "background:" + gradFor(lib.Name)) + '"></div>';
+  inner += '<div class="linfo"><div class="lname">' + esc(lib.Name) + '</div>' +
+    '<div class="lkind">' + (KIND_EN[lib.Kind] || "MIXED") + "</div></div>";
+  if (thumbs.length) {
+    inner += '<div class="lstack">' + thumbs.slice(0, 3).map(id =>
+      '<img loading="lazy" src="/api/items/' + id + '/image/backdrop" alt="" onerror="this.remove()">').join("") + "</div>";
+  }
+  inner += "</div>";
+  inner += '<div class="lcap">' + esc(lib.Name) + "</div>";
+  d.innerHTML = inner;
+  d.addEventListener("click", () => showLibrary(lib));
+  return d;
+}
+
+/* ---------------- navigation / views / drawer ---------------- */
+let LIBS = [];
+let currentView = "home";   // home | fav | grid | detail
+let drawerActive = "home";  // home | fav | lib:<id>
+function showView(name) {
+  currentView = name;
+  $("#view-home").style.display = name === "home" ? "" : "none";
+  $("#view-fav").style.display = name === "fav" ? "" : "none";
+  $("#view-grid").style.display = name === "grid" ? "" : "none";
+  $("#view-detail").style.display = name === "detail" ? "" : "none";
+  $("#tabHome").classList.toggle("on", name === "home" || name === "grid");
+  $("#tabFav").classList.toggle("on", name === "fav");
+  closeDrawer();
+}
+function renderDrawer() {
+  const nav = $("#drawerNav");
+  nav.innerHTML = "";
+  const mk = (label, key, fn) => {
+    const a = document.createElement("a");
+    a.textContent = label;
+    if (drawerActive === key) a.className = "on";
+    a.addEventListener("click", fn);
+    nav.appendChild(a);
+    return a;
+  };
+  mk("首页", "home", showHome);
+  mk("收藏夹", "fav", showFavorites);
+  const sec = document.createElement("div");
+  sec.className = "dsec";
+  sec.textContent = "媒体库";
+  nav.appendChild(sec);
+  LIBS.forEach(l => mk(l.Name, "lib:" + l.Id, () => showLibrary(l)));
+  const div = document.createElement("div");
+  div.className = "ddiv";
+  nav.appendChild(div);
+  mk("设置", "settings", openSettings);
+}
+function openDrawer() { $("#drawer").classList.add("open"); $("#drawerShade").classList.add("open"); }
+function closeDrawer() { $("#drawer").classList.remove("open"); $("#drawerShade").classList.remove("open"); }
+$("#burger").addEventListener("click", () => {
+  if ($("#drawer").classList.contains("open")) closeDrawer(); else openDrawer();
+});
+$("#drawerShade").addEventListener("click", closeDrawer);
+$("#logo").addEventListener("click", showHome);
+$("#tabHome").addEventListener("click", showHome);
+$("#tabFav").addEventListener("click", showFavorites);
+function showHome() { drawerActive = "home"; renderDrawer(); showView("home"); window.scrollTo(0, 0); }
+
+/* ---------------- home (Emby layout) ---------------- */
+function rowSection(title, railEl, onTitle) {
+  const sec = document.createElement("div");
+  sec.className = "row";
+  const head = document.createElement("div");
+  head.className = "rowhead";
+  const h2 = document.createElement("h2");
+  h2.textContent = title;
+  if (onTitle) {
+    h2.className = "clickable";
+    h2.addEventListener("click", onTitle);
+  }
+  head.appendChild(h2);
+  sec.appendChild(head);
+  sec.appendChild(railEl);
+  return sec;
 }
 async function loadHome() {
   try {
     const home = await api("/api/home");
     LIBS = home.Libraries || [];
-    setNav(null);
-    heroes = (home.Heroes && home.Heroes.length) ? home.Heroes : (home.Hero ? [home.Hero] : []);
-    heroIdx = 0;
-    renderHero();
-    restartHeroTimer();
-    const rows = $("#rows");
-    rows.innerHTML = "";
-    let any = heroes.length > 0;
-    const cont = home.ContinueWatching || [];
-    if (cont.length) {
+    renderDrawer();
+    const secs = $("#homeSecs");
+    secs.innerHTML = "";
+    let any = false;
+    if (LIBS.length) {
       any = true;
       const sec = document.createElement("div");
       sec.className = "row";
       const head = document.createElement("div");
       head.className = "rowhead";
-      head.innerHTML = "<h2>继续观看</h2>";
+      head.innerHTML = "<h2>我的媒体</h2>";
+      const grid = document.createElement("div");
+      grid.className = "libgrid";
+      LIBS.forEach(l => grid.appendChild(makeLibCard(l)));
+      sec.appendChild(head);
+      sec.appendChild(grid);
+      secs.appendChild(sec);
+    }
+    const cont = home.ContinueWatching || [];
+    if (cont.length) {
+      any = true;
       const rail = document.createElement("div");
       rail.className = "rail";
       cont.forEach(it => rail.appendChild(makeContinueCard(it)));
-      sec.appendChild(head);
-      sec.appendChild(rail);
-      rows.appendChild(sec);
+      secs.appendChild(rowSection("继续观看", rail, null));
     }
     for (const lib of LIBS) {
       try {
-        const page = await api("/api/libraries/" + lib.Id + "/items?sort=rating&limit=18");
+        const page = await api("/api/libraries/" + lib.Id + "/items?sort=added&limit=18");
         if (!page.Items || !page.Items.length) continue;
         any = true;
-        const sec = document.createElement("div");
-        sec.className = "row";
-        const head = document.createElement("div");
-        head.className = "rowhead";
-        head.innerHTML = "<h2>" + esc(lib.Name) + "</h2>";
-        const more = document.createElement("a");
-        more.textContent = "查看全部 ›";
-        more.addEventListener("click", () => showLibrary(lib));
-        head.appendChild(more);
         const rail = document.createElement("div");
         rail.className = "rail";
         page.Items.forEach(it => rail.appendChild(makeCard(it)));
-        sec.appendChild(head);
-        sec.appendChild(rail);
-        rows.appendChild(sec);
+        secs.appendChild(rowSection("最新" + lib.Name + " ›", rail, () => showLibrary(lib)));
       } catch (e) { /* one failing row must not break the home page */ }
     }
     $("#homeEmpty").style.display = any ? "none" : "";
@@ -629,31 +748,53 @@ async function loadHome() {
   }
 }
 
+/* ---------------- favorites ---------------- */
+async function showFavorites() {
+  drawerActive = "fav";
+  renderDrawer();
+  showView("fav");
+  window.scrollTo(0, 0);
+  const box = $("#favGrid");
+  box.innerHTML = "";
+  try {
+    const res = await api("/api/favorites");
+    (res.Items || []).forEach(it => box.appendChild(makeCard(it)));
+    $("#favCount").textContent = box.children.length ? "共 " + box.children.length + " 部" : "";
+    $("#favEmpty").style.display = box.children.length ? "none" : "";
+  } catch (e) {
+    toast("加载收藏夹失败：" + e.message);
+  }
+}
+
 /* ---------------- library grid & search ---------------- */
-const grid = { libId: null, cursor: "", loading: false };
+const grid = { libId: null, cursor: "", loading: false, started: false };
 async function showLibrary(lib) {
-  setNav(lib.Id);
+  drawerActive = "lib:" + lib.Id;
+  renderDrawer();
   showView("grid");
+  window.scrollTo(0, 0);
   $("#gridTitle").textContent = lib.Name;
   $("#gridCount").textContent = lib.ItemCount ? "共 " + lib.ItemCount + " 部" : "";
   $("#gridSort").style.display = "";
   grid.libId = lib.Id;
   grid.cursor = "";
+  grid.started = false;
   $("#grid").innerHTML = "";
   await loadGridPage();
 }
 async function loadGridPage() {
   if (grid.loading || grid.libId == null) return;
+  if (grid.started && !grid.cursor) return;
   grid.loading = true;
   try {
     const sort = $("#gridSort").value;
     let url = "/api/libraries/" + grid.libId + "/items?sort=" + sort + "&limit=60";
     if (grid.cursor) url += "&cursor=" + encodeURIComponent(grid.cursor);
     const page = await api(url);
+    grid.started = true;
     const box = $("#grid");
     (page.Items || []).forEach(it => box.appendChild(makeCard(it)));
     grid.cursor = page.NextCursor || "";
-    $("#loadMore").style.display = grid.cursor ? "" : "none";
     $("#gridEmpty").style.display = box.children.length ? "none" : "";
   } catch (e) {
     toast("加载失败：" + e.message);
@@ -661,14 +802,16 @@ async function loadGridPage() {
     grid.loading = false;
   }
 }
+const gridObserver = new IntersectionObserver(es => {
+  if (es[0].isIntersecting) loadGridPage();
+}, { rootMargin: "600px" });
+gridObserver.observe($("#gridSentinel"));
 let searchTimer = null;
 async function doSearch(q) {
-  setNav(-1);
   showView("grid");
   $("#gridTitle").textContent = "搜索：" + q;
   $("#gridCount").textContent = "";
   $("#gridSort").style.display = "none";
-  $("#loadMore").style.display = "none";
   grid.libId = null;
   const box = $("#grid");
   box.innerHTML = "";
@@ -683,7 +826,8 @@ async function doSearch(q) {
   }
 }
 
-/* ---------------- detail overlay ---------------- */
+/* ---------------- detail page (Emby-style) ---------------- */
+const detailState = { id: null, data: null, returnView: "home", returnScroll: 0, pushed: false, openSeasonId: null };
 function srcSummary(d) {
   const ms = (d.MediaSources || [])[0];
   if (!ms) return "";
@@ -694,65 +838,245 @@ function srcSummary(d) {
   if (ms.AudioSummary) parts.push(ms.AudioSummary);
   return parts.join(" · ");
 }
-async function openDetail(id) {
+async function openDetail(id, opts) {
+  opts = opts || {};
   try {
     const d = await api("/api/items/" + id);
-    const c = $("#detailContent");
-    let h = '<div class="dhead">';
-    if (d.HasBackdrop) h += '<img src="/api/items/' + d.Id + '/image/backdrop" alt="">';
-    h += '<div class="shade"></div><div class="inner"><h2>' + esc(d.Name) + "</h2>";
-    if (d.OriginalTitle) h += '<div class="orig">' + esc(d.OriginalTitle) + "</div>";
-    h += '<div class="meta" style="margin-top:10px">' + metaLine(d) + "</div></div></div>";
-    h += '<div class="dbody">';
-    h += '<div class="btnrow" style="margin-top:16px"><button class="btn play" id="dPlay">▶ 播放</button>' +
-         '<button class="btn ghost" id="dFav">＋ 收藏</button></div>';
-    const ss = srcSummary(d);
-    if (ss) h += '<div class="srcline">媒体信息 <b>' + esc(ss) + "</b></div>";
-    if ((d.Subtitles || []).length) h += '<div class="srcline">字幕 <b>' + d.Subtitles.length + " 条</b></div>";
-    if (d.Overview) h += '<p class="ov">' + esc(d.Overview) + "</p>";
-    if ((d.Genres || []).length) {
-      h += '<div class="chips">' + d.Genres.map(g => '<span class="chip">' + esc(g) + "</span>").join("") + "</div>";
+    // Resolve what "play" would start (series/season -> first episode)
+    // and where playback left off, for the resume line and played state.
+    let targetId = d.Id;
+    let posTicks = (d.UserData && d.UserData.PlaybackPositionTicks) || 0;
+    let targetEp = null;
+    let played = !!(d.UserData && d.UserData.Played);
+    if (d.Type === "Series" || d.Type === "Season") {
+      try {
+        const pi = await api("/api/items/" + id + "/play-info");
+        targetId = pi.ItemId;
+        posTicks = pi.PositionTicks || 0;
+        (d.Seasons || []).forEach(sn => (sn.Episodes || []).forEach(ep => {
+          if (ep.Id === pi.ItemId) targetEp = ep;
+        }));
+        if (targetEp && targetEp.UserData) played = !!targetEp.UserData.Played;
+      } catch (e) { /* nothing playable */ }
     }
-    if ((d.People || []).length) {
-      h += '<div class="castt">演职人员</div><div class="cast">';
-      d.People.forEach(p => {
-        h += '<div class="person"><div class="av"><span>' + esc((p.Name || "?").slice(0, 1)) + "</span>" +
-          (p.ImageUrl ? '<img loading="lazy" src="' + esc(p.ImageUrl) + '" alt="" onerror="this.remove()">' : "") +
-          '</div><div class="pn">' + esc(p.Name) + "</div>" +
-          (p.Role ? '<div class="pr">' + esc(p.Role) + "</div>" : "") + "</div>";
-      });
-      h += "</div>";
+    if (!opts.keepView) {
+      detailState.returnView = currentView === "detail" ? "home" : currentView;
+      detailState.returnScroll = window.scrollY;
+      detailState.openSeasonId = targetEp && targetEp.ParentId ? targetEp.ParentId
+        : ((d.Seasons && d.Seasons[0]) ? d.Seasons[0].Id : null);
     }
-    (d.Seasons || []).forEach(sn => {
-      h += '<div class="seasont">第 ' + (sn.IndexNumber || "") + ' 季</div><div class="eplist">';
-      (sn.Episodes || []).forEach(ep => {
-        const es = srcSummary(ep);
-        h += '<div class="ep" data-ep="' + ep.Id + '"><div class="no">' + (ep.IndexNumber || "") + '</div>' +
-          '<div class="ti"><div class="t">' + esc(ep.Name) + '</div>' +
-          (es ? '<div class="s">' + esc(es) + "</div>" : "") + "</div>" +
-          '<div class="rt">' + fmtRuntime(ep.RunTimeTicks) + "</div></div>";
-      });
-      h += "</div>";
-    });
-    h += "</div>";
-    c.innerHTML = h;
-    $("#dPlay").addEventListener("click", () => openPlayer(d.Id));
-    const dFav = $("#dFav");
-    paintFavBtn(dFav, !!(d.UserData && d.UserData.Favorite));
-    dFav.addEventListener("click", () => toggleFavorite(d.Id, dFav));
-    c.querySelectorAll(".ep").forEach(row =>
-      row.addEventListener("click", () => openPlayer(parseInt(row.dataset.ep, 10))));
-    openOverlay("detailOverlay");
+    detailState.id = id;
+    detailState.data = d;
+    renderDetail(d, { targetId: targetId, posTicks: posTicks, targetEp: targetEp, played: played });
+    showView("detail");
+    window.scrollTo(0, 0);
+    if (!opts.keepView && !opts.noPush) {
+      history.pushState({ ykDetail: id }, "");
+      detailState.pushed = true;
+    }
   } catch (e) {
     toast("打开详情失败：" + e.message);
+  }
+}
+function closeDetailUI() {
+  detailState.pushed = false;
+  detailState.id = null;
+  detailState.data = null;
+  const v = detailState.returnView || "home";
+  if (v === "fav") { showFavorites(); return; }
+  if (v === "grid") {
+    showView("grid");
+    window.scrollTo(0, detailState.returnScroll || 0);
+    return;
+  }
+  showHome();
+  window.scrollTo(0, detailState.returnScroll || 0);
+}
+function goBackFromDetail() {
+  if (detailState.pushed) history.back();
+  else closeDetailUI();
+}
+window.addEventListener("popstate", () => {
+  if (currentView === "detail") closeDetailUI();
+});
+function renderDetail(d, ctx) {
+  const page = $("#detailPage");
+  let h = "";
+  if (d.HasBackdrop) {
+    h += '<div class="dback"><img src="/api/items/' + d.Id + '/image/backdrop-hi" alt="" onerror="this.remove()"><div class="dshade"></div></div>';
+  } else {
+    h += '<div class="dback"><div class="dshade"></div></div>';
+  }
+  h += '<div class="dwrap">';
+  h += '<div class="dtop"><button class="roundbtn" id="dBack" title="返回">‹</button>' +
+       '<button class="roundbtn" id="dHomeBtn" title="首页">⌂</button></div>';
+  h += '<div class="dmain">';
+  h += '<div class="dposter"><div class="pwrap2">';
+  if (d.HasPoster) h += '<img src="/api/items/' + d.Id + '/image/poster" alt="" onerror="this.remove()">';
+  h += '<div class="fb" style="background:' + gradFor(d.Name) + '">' + esc(d.Name) + "</div></div></div>";
+  h += '<div class="dinfo"><h1>' + esc(d.Name) + "</h1>";
+  if (d.OriginalTitle) h += '<div class="orig">' + esc(d.OriginalTitle) + "</div>";
+  if (d.Type === "Episode" && d.SeriesName) {
+    h += '<div class="serieslink">所属剧集：<a id="dSeriesLink">' + esc(d.SeriesName) + "</a></div>";
+  }
+  let meta = metaLine(d);
+  if (d.Type === "Series" && (d.Seasons || []).length) {
+    meta += '<span class="badge">' + d.Seasons.length + " 季</span>";
+  }
+  h += '<div class="meta">' + meta + "</div>";
+  h += '<div class="dactions">' +
+    '<button class="btn play" id="dPlay">' + (ctx.posTicks > 0 ? "▶ 恢复播放" : "▶ 播放") + "</button>" +
+    '<button class="roundbtn' + (ctx.played ? " on" : "") + '" id="dPlayedBtn" title="标记已看">✓</button>' +
+    '<button class="roundbtn" id="dFavBtn" title="收藏">♥</button>' +
+    '<button class="roundbtn" id="dMoreBtn" title="更多">⋯</button></div>';
+  // Resume line: progress of the item (or of the episode play would start).
+  const rtTicks = ctx.targetEp ? ctx.targetEp.RunTimeTicks : d.RunTimeTicks;
+  if (ctx.posTicks > 0 && !ctx.played) {
+    let left = "";
+    if (ctx.targetEp) {
+      const sn = ctx.targetEp.ParentIndexNumber, en = ctx.targetEp.IndexNumber;
+      left = "S" + (sn != null ? sn : "?") + ":E" + (en != null ? en : "?") + " · " + (ctx.targetEp.Name || "");
+    }
+    let rem = "", pct = 0;
+    if (rtTicks > 0) {
+      pct = Math.min(100, Math.max(1, Math.round(ctx.posTicks / rtTicks * 100)));
+      rem = "剩余 " + fmtRuntime(rtTicks - ctx.posTicks);
+    }
+    h += '<div class="dresume"><div class="rline"><span class="left">' + esc(left) + '</span>' +
+      (rem ? '<span class="rem">' + rem + "</span>" : "") + "</div>" +
+      (rtTicks > 0 ? '<div class="rbar"><i style="width:' + pct + '%"></i></div>' : "") + "</div>";
+  }
+  if (d.Overview) {
+    const long = d.Overview.length > 200;
+    h += '<p class="dov' + (long ? " clamp" : "") + '" id="dOv">' + esc(d.Overview) + "</p>";
+    if (long) h += '<button class="ovtoggle" id="dOvToggle">更多</button>';
+  }
+  if ((d.Genres || []).length) {
+    h += '<div class="chips">' + d.Genres.map(g => '<span class="chip">' + esc(g) + "</span>").join("") + "</div>";
+  }
+  h += "</div></div></div>"; // dinfo / dmain / dwrap
+  h += '<div class="dbody2">';
+  // Media info (single-source items only; series carry it per episode).
+  const ms = (d.MediaSources || [])[0];
+  if (ms) {
+    let rows = "";
+    if (ms.Width) rows += '<div class="mirow"><span>分辨率</span><b>' + ms.Width + " × " + ms.Height + "</b></div>";
+    if (ms.VideoCodec) rows += '<div class="mirow"><span>视频编码</span><b>' + esc(ms.VideoCodec) + "</b></div>";
+    if (ms.Hdr) rows += '<div class="mirow"><span>HDR</span><b>' + esc(ms.Hdr) + "</b></div>";
+    if (ms.AudioSummary) rows += '<div class="mirow"><span>音轨</span><b>' + esc(ms.AudioSummary) + "</b></div>";
+    if (rows) h += '<div class="dsec">媒体信息</div><div class="mi">' + rows + "</div>";
+  }
+  if ((d.Subtitles || []).length) {
+    h += '<div class="srcline" style="margin-top:14px">字幕 <b>' + d.Subtitles.length + " 条（播放时在播放器 CC 菜单切换）</b></div>";
+  }
+  // Seasons + episodes.
+  if ((d.Seasons || []).length) {
+    h += '<div class="dsec">播出季</div><div class="seasonrail">';
+    d.Seasons.forEach(sn => {
+      h += '<div class="scard" data-season="' + sn.Id + '"><div class="swrap">';
+      if (d.HasPoster) h += '<img loading="lazy" src="/api/items/' + d.Id + '/image/poster" alt="" onerror="this.remove()">';
+      h += '<div class="fb" style="background:' + gradFor(d.Name) + '">' + esc(sn.Name) + "</div>";
+      h += '<span class="cntbadge">' + (sn.Episodes || []).length + " 集</span></div>";
+      h += '<div class="snm">' + esc(sn.Name) + "</div></div>";
+    });
+    h += '</div><div class="eplist" id="dEpisodes"></div>';
+  }
+  // Cast & crew: portrait cards.
+  if ((d.People || []).length) {
+    h += '<div class="dsec">演职人员</div><div class="cast">';
+    d.People.forEach(p => {
+      h += '<div class="person"><div class="pimg"><span>' + esc((p.Name || "?").slice(0, 1)) + "</span>" +
+        (p.ImageUrl ? '<img loading="lazy" src="' + esc(p.ImageUrl) + '" alt="" onerror="this.remove()">' : "") +
+        '</div><div class="pn">' + esc(p.Name) + "</div>" +
+        (p.Role ? '<div class="pr">' + esc(p.Role) + "</div>" : "") + "</div>";
+    });
+    h += "</div>";
+  }
+  h += "</div>";
+  page.innerHTML = h;
+
+  $("#dBack").addEventListener("click", goBackFromDetail);
+  $("#dHomeBtn").addEventListener("click", showHome);
+  if (d.SeriesId) {
+    const link = $("#dSeriesLink");
+    if (link) link.addEventListener("click", () => openDetail(d.SeriesId));
+  }
+  $("#dPlay").addEventListener("click", () => openPlayer(d.Id));
+  const playedBtn = $("#dPlayedBtn");
+  playedBtn.addEventListener("click", () => togglePlayed(d.Id, ctx.targetId, rtTicks, playedBtn));
+  const favBtn = $("#dFavBtn");
+  paintFavBtn(favBtn, !!(d.UserData && d.UserData.Favorite));
+  favBtn.addEventListener("click", () => toggleFavorite(d.Id, favBtn));
+  $("#dMoreBtn").addEventListener("click", e => {
+    const r = e.currentTarget.getBoundingClientRect();
+    openCtxMenu(r.left, r.bottom + 6, d, null);
+  });
+  const ovToggle = $("#dOvToggle");
+  if (ovToggle) {
+    ovToggle.addEventListener("click", () => {
+      const ov = $("#dOv");
+      const clamped = ov.classList.toggle("clamp");
+      ovToggle.textContent = clamped ? "更多" : "收起";
+    });
+  }
+  page.querySelectorAll(".scard").forEach(c => {
+    c.addEventListener("click", () => {
+      detailState.openSeasonId = parseInt(c.dataset.season, 10);
+      renderEpisodes();
+    });
+  });
+  renderEpisodes();
+}
+function epRowHTML(ep) {
+  const ud = ep.UserData || {};
+  const pct = (ud.PlaybackPositionTicks && ep.RunTimeTicks)
+    ? Math.min(100, Math.max(1, Math.round(ud.PlaybackPositionTicks / ep.RunTimeTicks * 100))) : 0;
+  const ss = srcSummary(ep);
+  let h = '<div class="ep" data-ep="' + ep.Id + '"><div class="no">' + (ep.IndexNumber != null ? ep.IndexNumber : "") + '</div><div class="ti">';
+  h += '<div class="t">' + esc(ep.Name) + (ud.Played ? '<span class="chk">✓</span>' : "") + "</div>";
+  if (ep.Overview) h += '<div class="s">' + esc(ep.Overview) + "</div>";
+  if (ss) h += '<div class="s">' + esc(ss) + "</div>";
+  if (pct > 0 && !ud.Played) h += '<div class="ebar"><i style="width:' + pct + '%"></i></div>';
+  h += '</div><div class="rt">' + fmtRuntime(ep.RunTimeTicks) + '</div><button class="epplay" title="播放">▶</button></div>';
+  return h;
+}
+function renderEpisodes() {
+  const box = $("#dEpisodes");
+  if (!box || !detailState.data) return;
+  const d = detailState.data;
+  const sn = (d.Seasons || []).find(s => s.Id === detailState.openSeasonId) || (d.Seasons || [])[0];
+  if (!sn) { box.innerHTML = ""; return; }
+  detailState.openSeasonId = sn.Id;
+  box.innerHTML = (sn.Episodes || []).map(epRowHTML).join("");
+  box.querySelectorAll(".ep").forEach(row =>
+    row.addEventListener("click", () => openPlayer(parseInt(row.dataset.ep, 10))));
+  document.querySelectorAll(".scard").forEach(c =>
+    c.classList.toggle("on", parseInt(c.dataset.season, 10) === sn.Id));
+}
+async function togglePlayed(detailId, targetId, runtimeTicks, btn) {
+  const isPlayed = btn.classList.contains("on");
+  try {
+    if (isPlayed) {
+      await api("/api/items/" + targetId + "/progress/reset", { method: "POST" });
+    } else {
+      const dur = runtimeTicks > 0 ? runtimeTicks / 1e7 : 1;
+      await api("/api/items/" + targetId + "/progress", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ positionSeconds: dur, durationSeconds: dur })
+      });
+    }
+    toast(isPlayed ? "已取消已看" : "已标记为已看");
+    openDetail(detailId, { keepView: true, noPush: true });
+  } catch (e) {
+    toast("操作失败：" + e.message);
   }
 }
 
 /* ---------------- favorites ---------------- */
 function paintFavBtn(btn, fav) {
   btn.dataset.fav = fav ? "1" : "0";
-  btn.textContent = fav ? "★ 已收藏" : "＋ 收藏";
   btn.classList.toggle("faved", fav);
+  if (!btn.classList.contains("roundbtn")) btn.textContent = fav ? "★ 已收藏" : "＋ 收藏";
 }
 async function toggleFavorite(id, btn) {
   try {
@@ -845,7 +1169,13 @@ function closePlayer() {
   v.querySelectorAll("track").forEach(t => t.remove());
   v.load();
   $("#playerOverlay").classList.remove("open");
-  if (id != null) loadHome();
+  if (id != null) {
+    loadHome();
+    if (currentView === "detail" && detailState.id != null) {
+      openDetail(detailState.id, { keepView: true, noPush: true });
+    }
+    if (currentView === "fav") showFavorites();
+  }
 }
 $("#playerClose").addEventListener("click", closePlayer);
 $("#playerVideo").addEventListener("timeupdate", () => reportProgress(false));
@@ -926,9 +1256,10 @@ $("#delConfirm").addEventListener("click", async () => {
     await api("/api/items/" + t.id, { method: "DELETE" });
     delTarget = null;
     closeOverlay("deleteOverlay");
-    closeOverlay("detailOverlay");
     if (t.cardEl && t.cardEl.isConnected) t.cardEl.remove();
     toast("已删除");
+    if (detailState.id === t.id) showHome();
+    loadHome();
   } catch (e) {
     toast("删除失败：" + e.message);
   }
@@ -945,6 +1276,7 @@ document.addEventListener("keydown", e => {
   if (e.key === "Escape") {
     if ($("#playerOverlay").classList.contains("open")) closePlayer();
     document.querySelectorAll(".overlay.open").forEach(ov => ov.classList.remove("open"));
+    closeDrawer();
   }
 });
 let confirmResolve = null;
@@ -973,7 +1305,7 @@ async function renderLibList() {
   try {
     const libs = await api("/api/libraries");
     LIBS = libs;
-    setNav(null);
+    renderDrawer();
     if (!libs.length) {
       box.innerHTML = '<div class="hint" style="padding:10px 6px">还没有媒体库，点下方按钮新建。</div>';
       return;
@@ -1103,14 +1435,15 @@ async function triggerScan(url, okMsg) {
   }
 }
 $("#scanAllBtn").addEventListener("click", () => triggerScan("/api/scan", "全库扫描已开始"));
-$("#gear").addEventListener("click", async () => {
+async function openSettings() {
   openOverlay("settingsOverlay");
   closeLibForm();
   await renderLibList();
   refreshStatsLine();
   refreshTMDBSetting();
   try { $("#scanStat").textContent = fmtScanStatus(await api("/api/scan/status")); } catch (e) {}
-});
+}
+$("#gear").addEventListener("click", openSettings);
 
 /* ---------------- settings: TMDB ---------------- */
 async function refreshTMDBSetting() {
@@ -1206,13 +1539,22 @@ $("#pickerOK").addEventListener("click", () => {
 });
 
 /* ---------------- wiring ---------------- */
-$("#logo").addEventListener("click", showHome);
 $("#gridSort").addEventListener("change", () => {
   grid.cursor = "";
+  grid.started = false;
   $("#grid").innerHTML = "";
   loadGridPage();
 });
-$("#loadMore").addEventListener("click", loadGridPage);
+$("#searchBtn").addEventListener("click", () => {
+  const box = $("#searchBox");
+  const open = box.classList.toggle("open");
+  if (open) {
+    $("#search").focus();
+  } else {
+    $("#search").value = "";
+    if (currentView === "grid" && grid.libId == null) showHome();
+  }
+});
 $("#search").addEventListener("input", e => {
   clearTimeout(searchTimer);
   const q = e.target.value.trim();

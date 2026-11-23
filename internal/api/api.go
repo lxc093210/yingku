@@ -54,6 +54,7 @@ func New(st *store.Store, scanner *scan.Scanner, defaultRoot string) http.Handle
 	mux.HandleFunc("GET /api/health", s.handleHealth)
 	mux.HandleFunc("GET /api/stats", s.handleStats)
 	mux.HandleFunc("GET /api/home", s.handleHome)
+	mux.HandleFunc("GET /api/favorites", s.handleFavorites)
 	mux.HandleFunc("GET /api/libraries", s.handleLibraries)
 	mux.HandleFunc("POST /api/libraries", s.handleLibraryCreate)
 	mux.HandleFunc("GET /api/libraries/{id}", s.handleLibraryGet)
@@ -91,6 +92,10 @@ type libraryDTO struct {
 	Kind      string   `json:"Kind"`
 	Paths     []string `json:"Paths"`
 	ItemCount int      `json:"ItemCount"`
+	// Thumbs holds up to three backdrop-owning top-level item ids of the
+	// library (highest rated first) for the home page's library cards;
+	// populated by the list/home handlers, empty elsewhere.
+	Thumbs []int64 `json:"Thumbs"`
 }
 
 func toLibraryDTO(l store.Library) libraryDTO {
@@ -98,7 +103,22 @@ func toLibraryDTO(l store.Library) libraryDTO {
 	if paths == nil {
 		paths = []string{}
 	}
-	return libraryDTO{ID: l.ID, Name: l.Name, Kind: l.Kind, Paths: paths, ItemCount: l.ItemCount}
+	return libraryDTO{ID: l.ID, Name: l.Name, Kind: l.Kind, Paths: paths, ItemCount: l.ItemCount, Thumbs: []int64{}}
+}
+
+// libraryDTOs converts libraries and fills each one's Thumbs in a single
+// extra query (best-effort: a thumbs failure leaves them empty).
+func (s *Server) libraryDTOs(libs []store.Library) []libraryDTO {
+	out := make([]libraryDTO, 0, len(libs))
+	thumbs, _ := s.st.LibraryThumbs()
+	for _, l := range libs {
+		d := toLibraryDTO(l)
+		if t := thumbs[l.ID]; len(t) > 0 {
+			d.Thumbs = t
+		}
+		out = append(out, d)
+	}
+	return out
 }
 
 type sourceDTO struct {
@@ -168,6 +188,11 @@ type itemDTO struct {
 	UserData          *userDataDTO      `json:"UserData,omitempty"`
 	// PlaybackPositionTicks is set on home ContinueWatching entries.
 	PlaybackPositionTicks int64 `json:"PlaybackPositionTicks,omitempty"`
+	// ContinueWatching episode entries also carry these for the
+	// "S1:E7 - 集名" caption line.
+	SeasonNumber  *int   `json:"SeasonNumber,omitempty"`
+	EpisodeNumber *int   `json:"EpisodeNumber,omitempty"`
+	EpisodeName   string `json:"EpisodeName,omitempty"`
 }
 
 type seasonDTO struct {
@@ -287,10 +312,7 @@ func (s *Server) handleHome(w http.ResponseWriter, r *http.Request) {
 	for _, it := range recent {
 		recentDTOs = append(recentDTOs, toDTO(it))
 	}
-	libDTOs := make([]libraryDTO, 0, len(libs))
-	for _, l := range libs {
-		libDTOs = append(libDTOs, toLibraryDTO(l))
-	}
+	libDTOs := s.libraryDTOs(libs)
 	cont, err := s.st.ContinueWatching(defaultUserID, 12)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())
@@ -303,6 +325,9 @@ func (s *Server) handleHome(w http.ResponseWriter, r *http.Request) {
 		if e.SeriesName != "" {
 			d.SeriesName = e.SeriesName
 		}
+		d.SeasonNumber = e.SeasonNumber
+		d.EpisodeNumber = e.EpisodeNumber
+		d.EpisodeName = e.EpisodeName
 		contDTOs = append(contDTOs, d)
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
@@ -317,11 +342,21 @@ func (s *Server) handleLibraries(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	out := make([]libraryDTO, 0, len(libs))
-	for _, l := range libs {
-		out = append(out, toLibraryDTO(l))
+	writeJSON(w, http.StatusOK, s.libraryDTOs(libs))
+}
+
+// handleFavorites lists the default user's favorited top-level items.
+func (s *Server) handleFavorites(w http.ResponseWriter, r *http.Request) {
+	items, err := s.st.Favorites(defaultUserID)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
 	}
-	writeJSON(w, http.StatusOK, out)
+	out := make([]itemDTO, 0, len(items))
+	for _, it := range items {
+		out = append(out, toDTO(it))
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"Items": out})
 }
 
 // ---- library management ----
@@ -574,6 +609,17 @@ func (s *Server) handleItem(w http.ResponseWriter, r *http.Request) {
 				}
 				for _, ms := range srcs {
 					ed.MediaSources = append(ed.MediaSources, toSourceDTO(ms))
+				}
+				// Per-episode watched/progress state for the detail page's
+				// episode list and resume line.
+				eud, err := s.st.UserDataOf(ep.ID, defaultUserID)
+				if err != nil {
+					writeErr(w, http.StatusInternalServerError, err.Error())
+					return
+				}
+				ed.UserData = &userDataDTO{
+					Played: eud.Played, Favorite: eud.Favorite,
+					PlaybackPositionTicks: eud.ProgressTicks,
 				}
 				sd.Episodes = append(sd.Episodes, ed)
 			}
