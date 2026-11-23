@@ -1043,8 +1043,11 @@ func (s *Store) Favorites(userID int64) ([]*Item, error) {
 	return out, rows.Err()
 }
 
-// LibraryThumbs returns, per library, up to three top-level item ids that
-// have a backdrop (highest rated first) for the home page's library cards.
+// LibraryThumbs returns, per library, up to three top-level item ids for
+// the home page's library cards. Items with a backdrop rank first (highest
+// rated first); poster-only items fill the remaining slots so libraries
+// whose items lack backdrops still get card art (the frontend falls back
+// from the backdrop endpoint to the poster endpoint per image).
 // One window-function query covers all libraries; no per-library scans.
 func (s *Store) LibraryThumbs() (map[int64][]int64, error) {
 	rows, err := s.db.Query(`
@@ -1052,11 +1055,12 @@ func (s *Store) LibraryThumbs() (map[int64][]int64, error) {
 			SELECT i.library_id AS library_id, i.id AS item_id,
 				ROW_NUMBER() OVER (
 					PARTITION BY i.library_id
-					ORDER BY i.rating DESC, i.id ASC
+					ORDER BY (CASE WHEN EXISTS(SELECT 1 FROM images WHERE item_id = i.id AND kind = 'backdrop') THEN 0 ELSE 1 END),
+						i.rating DESC, i.id ASC
 				) AS rn
 			FROM items i
 			WHERE i.parent_id IS NULL
-			  AND EXISTS(SELECT 1 FROM images WHERE item_id = i.id AND kind = 'backdrop')
+			  AND EXISTS(SELECT 1 FROM images WHERE item_id = i.id AND kind IN ('backdrop', 'poster'))
 		) WHERE rn <= 3
 		ORDER BY library_id, rn`)
 	if err != nil {

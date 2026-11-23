@@ -536,7 +536,7 @@ func TestFavoritesAndThumbs(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	mk := func(typ, path string, rating float64, backdrop bool, parent *int64) int64 {
+	mk := func(typ, path string, rating float64, imgKind string, parent *int64) int64 {
 		tx, err := st.Begin()
 		if err != nil {
 			t.Fatal(err)
@@ -548,8 +548,8 @@ func TestFavoritesAndThumbs(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if backdrop {
-			if err := tx.ReplaceImages(id, map[string]ImageFile{"backdrop": {Path: "/img/b.jpg"}}); err != nil {
+		if imgKind != "" {
+			if err := tx.ReplaceImages(id, map[string]ImageFile{imgKind: {Path: "/img/b.jpg"}}); err != nil {
 				t.Fatal(err)
 			}
 		}
@@ -558,13 +558,13 @@ func TestFavoritesAndThumbs(t *testing.T) {
 		}
 		return id
 	}
-	m1 := mk("movie", "/fav/m1", 9.0, true, nil)
-	m2 := mk("movie", "/fav/m2", 8.0, true, nil)
-	mk("movie", "/fav/m3", 7.0, true, nil)
-	mk("movie", "/fav/m4", 6.0, true, nil)
-	mk("movie", "/fav/nb", 9.9, false, nil) // top rating but no backdrop
-	s1 := mk("series", "/fav/s1", 8.5, true, nil)
-	ep := mk("episode", "/fav/s1/e1", 0, false, &s1)
+	m1 := mk("movie", "/fav/m1", 9.0, "backdrop", nil)
+	m2 := mk("movie", "/fav/m2", 8.0, "poster", nil) // poster only: fills after backdrop items
+	mk("movie", "/fav/m3", 7.0, "", nil)             // no image at all: excluded
+	mk("movie", "/fav/m4", 6.0, "poster", nil)
+	nb := mk("movie", "/fav/nb", 9.9, "poster", nil) // top rating but poster only
+	s1 := mk("series", "/fav/s1", 8.5, "backdrop", nil)
+	ep := mk("episode", "/fav/s1/e1", 0, "", &s1)
 
 	// Favorites: top-level only (the favorited episode stays out).
 	for _, id := range []int64{m2, s1, ep} {
@@ -583,13 +583,14 @@ func TestFavoritesAndThumbs(t *testing.T) {
 		t.Errorf("other user's favorites = %d, want 0", len(favs))
 	}
 
-	// Thumbs: rating order, backdrop required, capped at 3.
+	// Thumbs: backdrop items first (rating order), poster-only items fill
+	// the remaining slots, imageless items excluded, capped at 3.
 	thumbs, err := st.LibraryThumbs()
 	if err != nil {
 		t.Fatal(err)
 	}
 	got := thumbs[libID]
-	want := []int64{m1, s1, m2}
+	want := []int64{m1, s1, nb}
 	if len(got) != len(want) {
 		t.Fatalf("thumbs = %v, want %v", got, want)
 	}

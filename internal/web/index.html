@@ -620,14 +620,14 @@ function makeLibCard(lib) {
   const thumbs = lib.Thumbs || [];
   let inner = '<div class="lmain">';
   if (thumbs.length) {
-    inner += '<img class="lbg" loading="lazy" src="/api/items/' + thumbs[0] + '/image/backdrop" alt="" onerror="this.remove()">';
+    inner += '<img class="lbg" loading="lazy" src="/api/items/' + thumbs[0] + '/image/backdrop" alt="" onerror="if(!this.dataset.f){this.dataset.f=1;this.src=\'/api/items/' + thumbs[0] + '/image/poster\'}else{this.remove()}">';
   }
   inner += '<div class="lshade" style="' + (thumbs.length ? "" : "background:" + gradFor(lib.Name)) + '"></div>';
   inner += '<div class="linfo"><div class="lname">' + esc(lib.Name) + '</div>' +
     '<div class="lkind">' + (KIND_EN[lib.Kind] || "MIXED") + "</div></div>";
   if (thumbs.length) {
     inner += '<div class="lstack">' + thumbs.slice(0, 3).map(id =>
-      '<img loading="lazy" src="/api/items/' + id + '/image/backdrop" alt="" onerror="this.remove()">').join("") + "</div>";
+      '<img loading="lazy" src="/api/items/' + id + '/image/backdrop" alt="" onerror="if(!this.dataset.f){this.dataset.f=1;this.src=\'/api/items/' + id + '/image/poster\'}else{this.remove()}">').join("") + "</div>";
   }
   inner += "</div>";
   inner += '<div class="lcap">' + esc(lib.Name) + "</div>";
