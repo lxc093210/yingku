@@ -335,11 +335,17 @@ func TestFolderImagesPrefersLargest(t *testing.T) {
 	writePNG(t, cover, 40, 60)
 
 	imgs := folderImages([]string{backdrop, background, fanart, poster, cover})
-	if imgs["backdrop"] != background {
-		t.Errorf("backdrop = %q, want the larger background.jpg", imgs["backdrop"])
+	if imgs["backdrop"].Path != background {
+		t.Errorf("backdrop = %q, want the larger background.jpg", imgs["backdrop"].Path)
 	}
-	if imgs["poster"] != cover {
-		t.Errorf("poster = %q, want the larger cover.png", imgs["poster"])
+	if imgs["backdrop"].Width != 128 || imgs["backdrop"].Height != 72 {
+		t.Errorf("backdrop dims = %dx%d, want 128x72", imgs["backdrop"].Width, imgs["backdrop"].Height)
+	}
+	if imgs["poster"].Path != cover {
+		t.Errorf("poster = %q, want the larger cover.png", imgs["poster"].Path)
+	}
+	if imgs["poster"].Width != 40 || imgs["poster"].Height != 60 {
+		t.Errorf("poster dims = %dx%d, want 40x60", imgs["poster"].Width, imgs["poster"].Height)
 	}
 }
 

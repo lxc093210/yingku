@@ -513,7 +513,7 @@ func (s *Scanner) scanPath(lib store.Library, libPath string, owners []rootOwner
 type pendingItem struct {
 	item    *store.Item
 	sources []store.MediaSource
-	images  map[string]string
+	images  map[string]store.ImageFile
 	subs    []store.Subtitle
 	people  []store.Person // nil = leave existing people untouched
 	countEp bool
@@ -945,26 +945,36 @@ var backdropCandidates = []string{"backdrop.jpg", "backdrop.png", "background.jp
 // folderImages maps poster/backdrop files in an item folder. When several
 // candidates exist for a kind, the one with the largest pixel dimensions
 // wins (scrapers often leave a small backdrop.jpg next to a full-size
-// background.jpg); ties keep the earlier name in the candidate list.
-func folderImages(files []string) map[string]string {
+// background.jpg); ties keep the earlier name in the candidate list. The
+// winning file's dimensions are recorded alongside its path so the hero
+// rotation can tier candidates by backdrop resolution.
+func folderImages(files []string) map[string]store.ImageFile {
 	byName := map[string]string{}
 	for _, f := range files {
 		byName[strings.ToLower(filepath.Base(f))] = f
 	}
-	out := map[string]string{}
+	out := map[string]store.ImageFile{}
 	for kind, candidates := range map[string][]string{"poster": posterCandidates, "backdrop": backdropCandidates} {
-		best := ""
+		var best store.ImageFile
 		var bestScore int64 = -1
 		for _, name := range candidates {
 			p, ok := byName[name]
 			if !ok {
 				continue
 			}
-			if score := imageScore(p); score > bestScore {
-				best, bestScore = p, score
+			w, h, dimsOK := imageDims(p)
+			var score int64
+			if dimsOK {
+				score = int64(w) * int64(h)
+			} else if st, err := os.Stat(p); err == nil {
+				score = st.Size()
+			}
+			if score > bestScore {
+				bestScore = score
+				best = store.ImageFile{Path: p, Width: w, Height: h}
 			}
 		}
-		if best != "" {
+		if best.Path != "" {
 			out[kind] = best
 		}
 	}

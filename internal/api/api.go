@@ -62,6 +62,11 @@ func New(st *store.Store, scanner *scan.Scanner, defaultRoot string) http.Handle
 	mux.HandleFunc("POST /api/libraries/{id}/scan", s.handleLibraryScan)
 	mux.HandleFunc("GET /api/libraries/{id}/items", s.handleLibraryItems)
 	mux.HandleFunc("GET /api/items/{id}", s.handleItem)
+	mux.HandleFunc("DELETE /api/items/{id}", s.handleItemDelete)
+	mux.HandleFunc("GET /api/items/{id}/delete-preview", s.handleDeletePreview)
+	mux.HandleFunc("GET /api/items/{id}/subtitles", s.handleItemSubtitles)
+	mux.HandleFunc("GET /api/subtitles/{subId}/track", s.handleSubtitleTrack)
+	mux.HandleFunc("GET /api/items/{id}/image/backdrop-hi", s.handleBackdropHi)
 	mux.HandleFunc("GET /api/items/{id}/image/{kind}", s.handleImage)
 	mux.HandleFunc("GET /api/items/{id}/play-info", s.handlePlayInfo)
 	mux.HandleFunc("GET /api/items/{id}/stream", s.handleStream)
@@ -606,12 +611,12 @@ func (s *Server) handleItem(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if (it.Type == "movie" || it.Type == "series") && it.TmdbID > 0 && peopleThumbsMissing(people) {
-		if key, kerr := s.st.GetSetting(settingTMDBKey); kerr == nil && key != "" {
+		if cfg, cerr := s.tmdbCfg(); cerr == nil && cfg.available() {
 			kind := "movie"
 			if it.Type == "series" {
 				kind = "tv"
 			}
-			if cast, ferr := fetchTMDBCast(key, kind, it.TmdbID); ferr == nil && len(cast) > 0 {
+			if cast, ferr := fetchTMDBCast(cfg, kind, it.TmdbID); ferr == nil && len(cast) > 0 {
 				_ = s.st.ReplacePeople(it.ID, cast)
 				people = cast
 			}
@@ -696,6 +701,10 @@ func (s *Server) handlePlayInfo(w http.ResponseWriter, r *http.Request) {
 
 // handleStream 302-redirects to the item's STRM target URL, read fresh
 // from the .strm file. Only movies/episodes are directly playable.
+// Note: browser playback is a single-file direct stream, so embedded
+// audio tracks of the underlying file cannot be switched from the web
+// player (that would need transcoding/remuxing, deliberately out of
+// scope); sidecar subtitles ARE switchable via /api/subtitles tracks.
 func (s *Server) handleStream(w http.ResponseWriter, r *http.Request) {
 	id, err := pathID(r)
 	if err != nil {
@@ -837,34 +846,62 @@ func (s *Server) handleFavorite(w http.ResponseWriter, r *http.Request) {
 
 // ---- app settings ----
 
+type settingsDTO struct {
+	TMDBKeySet  bool   `json:"tmdbKeySet"`
+	TMDBBaseURL string `json:"tmdbBaseUrl"`
+}
+
+func (s *Server) settingsDTO() (settingsDTO, error) {
+	cfg, err := s.tmdbCfg()
+	if err != nil {
+		return settingsDTO{}, err
+	}
+	// Only whether a key exists is exposed — never the key itself. The
+	// base URL reported is the effective one (official default included).
+	return settingsDTO{TMDBKeySet: cfg.key != "", TMDBBaseURL: cfg.base}, nil
+}
+
 func (s *Server) handleSettingsGet(w http.ResponseWriter, r *http.Request) {
-	key, err := s.st.GetSetting(settingTMDBKey)
+	dto, err := s.settingsDTO()
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	// Only whether a key exists is exposed — never the key itself.
-	writeJSON(w, http.StatusOK, map[string]bool{"tmdbKeySet": key != ""})
+	writeJSON(w, http.StatusOK, dto)
 }
 
 func (s *Server) handleSettingsPut(w http.ResponseWriter, r *http.Request) {
+	// Pointer fields distinguish "leave unchanged" from "set/clear".
 	var p struct {
-		TMDBAPIKey string `json:"tmdbApiKey"`
+		TMDBAPIKey  *string `json:"tmdbApiKey"`
+		TMDBBaseURL *string `json:"tmdbBaseUrl"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&p); err != nil {
 		writeErr(w, http.StatusBadRequest, "invalid JSON body")
 		return
 	}
-	if err := s.st.SetSetting(settingTMDBKey, strings.TrimSpace(p.TMDBAPIKey)); err != nil {
-		writeErr(w, http.StatusInternalServerError, err.Error())
-		return
+	if p.TMDBAPIKey != nil {
+		if err := s.st.SetSetting(settingTMDBKey, strings.TrimSpace(*p.TMDBAPIKey)); err != nil {
+			writeErr(w, http.StatusInternalServerError, err.Error())
+			return
+		}
 	}
-	key, err := s.st.GetSetting(settingTMDBKey)
+	if p.TMDBBaseURL != nil {
+		base := strings.TrimRight(strings.TrimSpace(*p.TMDBBaseURL), "/")
+		if base == defaultTMDBBase {
+			base = "" // the official default needs no stored override
+		}
+		if err := s.st.SetSetting(settingTMDBBaseURL, base); err != nil {
+			writeErr(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+	}
+	dto, err := s.settingsDTO()
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]bool{"tmdbKeySet": key != ""})
+	writeJSON(w, http.StatusOK, dto)
 }
 
 func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
@@ -887,6 +924,62 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"Items": out})
 }
 
+// pathWithinRoots reports whether clean (already filepath.Clean'ed) lies
+// inside one of the registered library roots.
+func (s *Server) pathWithinRoots(clean string) (bool, error) {
+	roots, err := s.st.LibraryPaths()
+	if err != nil {
+		return false, err
+	}
+	for _, root := range roots {
+		if withinRoot(filepath.Clean(root), clean) {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+// serveFile streams one regular file with range support.
+func serveFile(w http.ResponseWriter, r *http.Request, path string) {
+	f, err := os.Open(path)
+	if err != nil {
+		writeErr(w, http.StatusNotFound, "file missing")
+		return
+	}
+	defer f.Close()
+	fi, err := f.Stat()
+	if err != nil || !fi.Mode().IsRegular() {
+		writeErr(w, http.StatusNotFound, "file missing")
+		return
+	}
+	http.ServeContent(w, r, fi.Name(), fi.ModTime(), f)
+}
+
+// serveLocalImage serves an item's registered poster/backdrop from disk,
+// guarded to files under a library root.
+func (s *Server) serveLocalImage(w http.ResponseWriter, r *http.Request, id int64, kind string) {
+	p, err := s.st.ImagePath(id, kind)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if p == "" {
+		writeErr(w, http.StatusNotFound, "no such image")
+		return
+	}
+	clean := filepath.Clean(p)
+	allowed, err := s.pathWithinRoots(clean)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if !allowed {
+		writeErr(w, http.StatusForbidden, "path outside library")
+		return
+	}
+	serveFile(w, r, clean)
+}
+
 func (s *Server) handleImage(w http.ResponseWriter, r *http.Request) {
 	id, err := pathID(r)
 	if err != nil {
@@ -898,46 +991,59 @@ func (s *Server) handleImage(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "bad image kind")
 		return
 	}
-	p, err := s.st.ImagePath(id, kind)
+	s.serveLocalImage(w, r, id, kind)
+}
+
+// backdropCacheDir is <data dir>/cache/backdrops, derived from the DB
+// file location (the cached TMDB originals live next to the database).
+func (s *Server) backdropCacheDir() string {
+	return filepath.Join(filepath.Dir(s.st.DBPath()), "cache", "backdrops")
+}
+
+// handleBackdropHi serves the highest-resolution backdrop available for
+// the hero: a previously cached TMDB original when present, otherwise a
+// fresh TMDB fetch (cached for next time), otherwise the local backdrop.
+func (s *Server) handleBackdropHi(w http.ResponseWriter, r *http.Request) {
+	id, err := pathID(r)
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, "bad item id")
+		return
+	}
+	it, err := s.st.GetItem(id)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	if p == "" {
-		writeErr(w, http.StatusNotFound, "no such image")
+	if it == nil {
+		writeErr(w, http.StatusNotFound, "item not found")
 		return
 	}
-	// Guard: only serve files registered under a library root.
-	clean := filepath.Clean(p)
-	roots, err := s.st.LibraryPaths()
-	if err != nil {
-		writeErr(w, http.StatusInternalServerError, err.Error())
+	cacheFile := filepath.Join(s.backdropCacheDir(), strconv.FormatInt(id, 10)+".jpg")
+	if fi, err := os.Stat(cacheFile); err == nil && fi.Mode().IsRegular() && fi.Size() > 0 {
+		serveFile(w, r, cacheFile)
 		return
 	}
-	allowed := false
-	for _, root := range roots {
-		rc := filepath.Clean(root)
-		if clean == rc || strings.HasPrefix(clean, rc+string(filepath.Separator)) {
-			allowed = true
-			break
+	if (it.Type == "movie" || it.Type == "series") && it.TmdbID > 0 {
+		if cfg, cerr := s.tmdbCfg(); cerr == nil && cfg.available() {
+			kind := "movie"
+			if it.Type == "series" {
+				kind = "tv"
+			}
+			if fp, ferr := fetchTMDBBackdrop(cfg, kind, it.TmdbID); ferr == nil && fp != "" {
+				if data, derr := cfg.downloadBackdrop(fp); derr == nil && len(data) > 0 {
+					_ = os.MkdirAll(s.backdropCacheDir(), 0o755)
+					tmp := cacheFile + ".tmp"
+					if werr := os.WriteFile(tmp, data, 0o644); werr == nil {
+						_ = os.Rename(tmp, cacheFile)
+						serveFile(w, r, cacheFile)
+						return
+					}
+				}
+			}
 		}
 	}
-	if !allowed {
-		writeErr(w, http.StatusForbidden, "path outside library")
-		return
-	}
-	f, err := os.Open(clean)
-	if err != nil {
-		writeErr(w, http.StatusNotFound, "image file missing")
-		return
-	}
-	defer f.Close()
-	fi, err := f.Stat()
-	if err != nil || !fi.Mode().IsRegular() {
-		writeErr(w, http.StatusNotFound, "image file missing")
-		return
-	}
-	http.ServeContent(w, r, fi.Name(), fi.ModTime(), f)
+	// Fallback: whatever local backdrop the scanner registered.
+	s.serveLocalImage(w, r, id, "backdrop")
 }
 
 func (s *Server) handleScanStart(w http.ResponseWriter, r *http.Request) {

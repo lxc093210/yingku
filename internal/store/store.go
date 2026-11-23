@@ -305,14 +305,22 @@ func (t *Tx) ReplaceSources(itemID int64, sources []MediaSource) error {
 	return nil
 }
 
-// ReplaceImages swaps all images of an item. images maps kind -> local path.
-func (t *Tx) ReplaceImages(itemID int64, images map[string]string) error {
+// ImageFile is one registered image of an item: local path plus pixel
+// dimensions (0 = unknown, e.g. the header could not be parsed).
+type ImageFile struct {
+	Path   string
+	Width  int
+	Height int
+}
+
+// ReplaceImages swaps all images of an item. images maps kind -> file.
+func (t *Tx) ReplaceImages(itemID int64, images map[string]ImageFile) error {
 	if _, err := t.tx.Exec(`DELETE FROM images WHERE item_id = ?`, itemID); err != nil {
 		return err
 	}
-	for kind, p := range images {
-		if _, err := t.tx.Exec(`INSERT INTO images(item_id, kind, local_path) VALUES (?, ?, ?)`,
-			itemID, kind, p); err != nil {
+	for kind, img := range images {
+		if _, err := t.tx.Exec(`INSERT INTO images(item_id, kind, local_path, width, height) VALUES (?, ?, ?, ?, ?)`,
+			itemID, kind, img.Path, img.Width, img.Height); err != nil {
 			return err
 		}
 	}
@@ -648,6 +656,35 @@ func (s *Store) ImagePath(itemID int64, kind string) (string, error) {
 	return p, err
 }
 
+// GetSubtitle returns one subtitle row by id, or nil.
+func (s *Store) GetSubtitle(id int64) (*Subtitle, error) {
+	var sub Subtitle
+	err := s.db.QueryRow(`SELECT id, item_id, path, lang FROM subtitles WHERE id = ?`, id).
+		Scan(&sub.ID, &sub.ItemID, &sub.Path, &sub.Lang)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &sub, nil
+}
+
+// DeleteItem removes one item row. Foreign-key cascades clear its
+// children (seasons/episodes) and every dependent row (sources, images,
+// subtitles, people, user_data); the FTS delete trigger keeps the search
+// index in sync.
+func (s *Store) DeleteItem(id int64) error {
+	res, err := s.db.Exec(`DELETE FROM items WHERE id = ?`, id)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return sql.ErrNoRows
+	}
+	return nil
+}
+
 // Hero returns the highest-rated top-level item that has a backdrop.
 func (s *Store) Hero() (*Item, error) {
 	heroes, err := s.Heroes(1)
@@ -661,23 +698,30 @@ func (s *Store) Hero() (*Item, error) {
 // backdrop (hero rotation candidates for the home page). Ratings are
 // restricted to the plausible band: the library carries thousands of 0.0
 // (unrated) rows and a batch of bogus 10.0 scores written by scrapers,
-// both of which would otherwise poison the rotation.
+// both of which would otherwise poison the rotation. Within the band,
+// items are first tiered by backdrop pixel width (>=1920, then >=1280,
+// then the rest / unknown) so the full-screen hero prefers genuinely
+// high-resolution artwork; rating decides inside a tier.
 func (s *Store) Heroes(limit int) ([]*Item, error) {
 	if limit <= 0 || limit > 50 {
 		limit = 5
 	}
-	rows, err := s.db.Query(`SELECT `+itemCols+` FROM items
+	rows, err := s.db.Query(`SELECT `+itemCols+`,
+			COALESCE((SELECT width FROM images WHERE item_id = items.id AND kind = 'backdrop'), 0) AS bw
+		FROM items
 		WHERE parent_id IS NULL
 		  AND rating BETWEEN 6.5 AND 9.9
 		  AND EXISTS(SELECT 1 FROM images WHERE item_id = items.id AND kind = 'backdrop')
-		ORDER BY rating DESC, year DESC, id ASC LIMIT ?`, limit)
+		ORDER BY (CASE WHEN bw >= 1920 THEN 0 WHEN bw >= 1280 THEN 1 ELSE 2 END),
+			rating DESC, year DESC, id ASC LIMIT ?`, limit)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 	var out []*Item
 	for rows.Next() {
-		it, err := scanItem(rows)
+		var bw int
+		it, err := scanItemX(rows, &bw)
 		if err != nil {
 			return nil, err
 		}

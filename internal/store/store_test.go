@@ -103,7 +103,7 @@ func insertRatedItem(t *testing.T, st *Store, libID int64, path string, rating f
 		t.Fatal(err)
 	}
 	if backdrop {
-		if err := tx.ReplaceImages(id, map[string]string{"backdrop": "/img/backdrop.jpg"}); err != nil {
+		if err := tx.ReplaceImages(id, map[string]ImageFile{"backdrop": {Path: "/img/backdrop.jpg"}}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -138,6 +138,98 @@ func TestHeroesRatingFilter(t *testing.T) {
 		}
 		t.Fatalf("heroes = %v, want [%d %d] (only plausible ratings with backdrop)", got, good, good2)
 	}
+}
+
+func insertHeroItem(t *testing.T, st *Store, libID int64, path string, rating float64, backdropWidth int) int64 {
+	t.Helper()
+	tx, err := st.Begin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	id, err := tx.UpsertItem(&Item{
+		LibraryID: libID, Type: "movie", Path: path,
+		Title: path, SortTitle: path, Rating: rating,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := tx.ReplaceImages(id, map[string]ImageFile{
+		"backdrop": {Path: "/img/" + path + ".jpg", Width: backdropWidth, Height: backdropWidth * 9 / 16},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatal(err)
+	}
+	return id
+}
+
+func TestHeroesBackdropWidthTiers(t *testing.T) {
+	st := openTempStore(t)
+	libID, err := st.CreateLibrary("主打库", "movie", []string{"/heroes"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	w1920 := insertHeroItem(t, st, libID, "/heroes/fullhd", 7.0, 1920)
+	w1280 := insertHeroItem(t, st, libID, "/heroes/hd", 9.0, 1280)
+	w800 := insertHeroItem(t, st, libID, "/heroes/sd", 9.5, 800)
+	// Unknown width shares the lowest tier with sub-1280 widths; inside
+	// the tier rating decides, so this one ranks below the 800px item.
+	w0 := insertHeroItem(t, st, libID, "/heroes/unknown", 9.0, 0)
+
+	heroes, err := st.Heroes(10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []int64{w1920, w1280, w800, w0}
+	if len(heroes) != len(want) {
+		t.Fatalf("heroes = %d, want %d", len(heroes), len(want))
+	}
+	for i, id := range want {
+		if heroes[i].ID != id {
+			t.Errorf("hero[%d] = %d, want %d (width tier before rating)", i, heroes[i].ID, id)
+		}
+	}
+}
+
+func TestImagesDimensionMigration(t *testing.T) {
+	// Simulate a pre-dimensions database: images without width/height.
+	path := filepath.Join(t.TempDir(), "old.db")
+	db, err := sql.Open("sqlite", "file:"+path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`CREATE TABLE images (
+		id INTEGER PRIMARY KEY, item_id INTEGER NOT NULL,
+		kind TEXT NOT NULL, local_path TEXT NOT NULL)`); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+	st, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	for _, col := range []string{"width", "height"} {
+		has, err := columnExists(st.DB(), "images", col)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !has {
+			t.Errorf("images.%s missing after migration", col)
+		}
+	}
+	// Reopening stays clean (idempotent).
+	if err := st.Close(); err != nil {
+		t.Fatal(err)
+	}
+	st2, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	st2.Close()
 }
 
 func TestRatingSortSinksBogusScores(t *testing.T) {

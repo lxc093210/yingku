@@ -51,13 +51,14 @@
   .pad{padding-top:calc(var(--bar-h) + 14px)}
 
   /* ---------- hero ---------- */
-  .hero{position:relative;min-height:66vh;display:flex;align-items:flex-end;overflow:hidden}
-  .hero img.bg{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;
+  .hero{position:relative;height:clamp(430px,74vh,820px);display:flex;align-items:flex-end;overflow:hidden}
+  .hero img.bg{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;object-position:center 20%;
     opacity:0;transition:opacity .6s}
+  @media (min-width:1600px){ .hero img.bg{object-position:center 22%} }
   .hero img.bg.show{opacity:.92}
   .hero .shade{position:absolute;inset:0;
     background:linear-gradient(90deg,rgba(11,11,13,.94) 26%,rgba(11,11,13,.45) 58%,rgba(11,11,13,.08)),
-               linear-gradient(0deg,var(--bg) 2%,transparent 46%),
+               linear-gradient(0deg,var(--bg) 2%,rgba(11,11,13,.5) 30%,transparent 55%),
                linear-gradient(180deg,rgba(11,11,13,.5),transparent 30%)}
   .hero .inner{position:relative;padding:0 4% 54px;max-width:680px;width:100%}
   .hero .kick{font-size:12px;letter-spacing:.34em;color:#f3f3f4;opacity:.75;margin-bottom:10px}
@@ -165,6 +166,18 @@
   .person .pr{font-size:11.5px;color:var(--muted);line-height:1.35;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .btn.faved{background:var(--red);border-color:var(--red);color:#fff}
 
+  /* ---------- context menu / delete ---------- */
+  .ctxmenu{position:fixed;z-index:140;min-width:168px;background:var(--panel2);border:1px solid var(--line);
+    border-radius:12px;padding:6px;box-shadow:0 18px 50px rgba(0,0,0,.55)}
+  .ctxmenu button{display:flex;width:100%;text-align:left;padding:9px 12px;border-radius:8px;
+    font-size:13.5px;color:var(--text);background:none;border:none;cursor:pointer}
+  .ctxmenu button:hover{background:rgba(255,255,255,.08)}
+  .ctxmenu button.danger{color:#ff6b61}
+  .ctxmenu button.danger:hover{background:rgba(229,9,20,.14)}
+  .delpaths{margin:10px 0;padding:10px 12px;background:var(--panel);border:1px solid var(--line);
+    border-radius:10px;font-size:12.5px;color:var(--muted);word-break:break-all;max-height:150px;overflow:auto}
+  .delpaths div{padding:2px 0}
+
   /* ---------- player ---------- */
   .player{position:fixed;inset:0;z-index:130;background:#000;display:none;flex-direction:column}
   .player.open{display:flex}
@@ -230,7 +243,7 @@
     header{flex-wrap:wrap;height:auto;padding:10px 4%;row-gap:8px}
     nav{order:3;width:100%}
     .searchbox input{width:110px}
-    .hero{min-height:52vh}
+    .hero{height:auto;min-height:52vh}
     .hero .inner{padding-bottom:38px}
     .hero .dots{display:none}
     .card{width:112px}
@@ -340,6 +353,12 @@
           style="flex:1;background:var(--panel);border:1px solid var(--line);color:var(--text);border-radius:8px;padding:9px 12px;font-size:14px;outline:none">
         <button type="button" class="btn small" id="tmdbSave">保存</button>
       </div>
+      <label style="display:block;font-size:13px;color:var(--muted);margin:12px 0 6px">API 基址（可选）</label>
+      <div class="pathrow">
+        <input type="text" id="tmdbBase" placeholder="https://api.themoviedb.org/3" autocomplete="off"
+          style="flex:1;background:var(--panel);border:1px solid var(--line);color:var(--text);border-radius:8px;padding:9px 12px;font-size:14px;outline:none">
+      </div>
+      <div class="hint">使用自建 TMDB 代理时填代理地址：代理会在服务端注入 Key，此时可不填 Key；演员补齐与高清背景图都会走这个基址。</div>
     </div>
   </div>
 </div>
@@ -373,6 +392,22 @@
       <div class="modalfoot">
         <button class="btn" id="confirmNo">取消</button>
         <button class="btn red" id="confirmYes">确认</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- delete media -->
+<div class="overlay" id="deleteOverlay" style="z-index:115">
+  <div class="sheet" style="max-width:460px;position:relative">
+    <div class="setbody">
+      <h2 style="font-size:17px">删除媒体</h2>
+      <div class="hint" id="delInfo">—</div>
+      <div class="delpaths" id="delPaths"></div>
+      <div class="hint">将同时删除磁盘文件与库内记录，不可恢复。</div>
+      <div class="modalfoot">
+        <button class="btn" id="delCancel">取消</button>
+        <button class="btn red" id="delConfirm">确认删除</button>
       </div>
     </div>
   </div>
@@ -445,6 +480,7 @@ function makeCard(it) {
   inner += '<div class="nm">' + esc(it.Name) + '</div><div class="yr">' + (it.ProductionYear || "") + (it.Type === "Series" ? " · 剧集" : "") + "</div>";
   d.innerHTML = inner;
   d.addEventListener("click", () => openDetail(it.Id));
+  d.addEventListener("contextmenu", e => { e.preventDefault(); openCtxMenu(e.clientX, e.clientY, it, d); });
   return d;
 }
 function makeContinueCard(it) {
@@ -467,6 +503,7 @@ function makeContinueCard(it) {
     (it.SeriesName ? esc(it.Name) + " · " : "") + (pct ? "看到 " + pct + "%" : "") + "</div>";
   d.innerHTML = inner;
   d.addEventListener("click", () => openPlayer(it.Id));
+  d.addEventListener("contextmenu", e => { e.preventDefault(); openCtxMenu(e.clientX, e.clientY, it, d); });
   return d;
 }
 
@@ -504,9 +541,13 @@ function renderHero() {
   const bg = $("#heroBg");
   bg.classList.remove("show");
   bg.onload = () => bg.classList.add("show");
-  bg.onerror = () => bg.classList.remove("show");
-  if (it.HasBackdrop) { bg.src = "/api/items/" + it.Id + "/image/backdrop"; }
-  else { bg.removeAttribute("src"); }
+  bg.onerror = () => {
+    // Hi-res (TMDB) backdrop failed: fall back to the local backdrop.
+    if (bg.dataset.hi) { bg.dataset.hi = ""; bg.src = "/api/items/" + it.Id + "/image/backdrop"; }
+    else bg.classList.remove("show");
+  };
+  if (it.HasBackdrop) { bg.dataset.hi = "1"; bg.src = "/api/items/" + it.Id + "/image/backdrop-hi"; }
+  else { bg.dataset.hi = ""; bg.removeAttribute("src"); }
   $("#heroTitle").textContent = it.Name || "";
   $("#heroOrig").textContent = it.OriginalTitle || "";
   $("#heroMeta").innerHTML = metaLine(it);
@@ -743,6 +784,27 @@ async function openPlayer(id) {
     $("#playerTitle").textContent = (info.SeriesName ? info.SeriesName + " · " : "") + (info.Name || "");
     const v = $("#playerVideo");
     v.src = "/api/items/" + info.ItemId + "/stream";
+    // Subtitle tracks: sidecar subtitles are converted to WebVTT by the
+    // API and switched through the browser's native CC menu. (Embedded
+    // audio tracks of the file itself cannot be switched in a browser —
+    // that would need transcoding/remuxing, deliberately not offered.)
+    v.querySelectorAll("track").forEach(t => t.remove());
+    try {
+      const subs = await api("/api/items/" + info.ItemId + "/subtitles");
+      let chinesePicked = false;
+      (subs || []).forEach(sb => {
+        const tr = document.createElement("track");
+        tr.kind = "subtitles";
+        tr.label = sb.Label;
+        tr.srclang = sb.Lang;
+        tr.src = "/api/subtitles/" + sb.Id + "/track";
+        if (!chinesePicked && (sb.Lang === "zh-cn" || sb.Lang === "zh-tw")) {
+          tr.default = true;
+          chinesePicked = true;
+        }
+        v.appendChild(tr);
+      });
+    } catch (e) { /* subtitles are optional */ }
     if (info.PositionTicks > 0) {
       const seek = () => {
         try { v.currentTime = info.PositionTicks / 1e7; } catch (e) {}
@@ -780,6 +842,7 @@ function closePlayer() {
   const v = $("#playerVideo");
   v.pause();
   v.removeAttribute("src");
+  v.querySelectorAll("track").forEach(t => t.remove());
   v.load();
   $("#playerOverlay").classList.remove("open");
   if (id != null) loadHome();
@@ -791,6 +854,84 @@ $("#playerVideo").addEventListener("ended", () => {
   const v = $("#playerVideo");
   if (player.id != null && v.duration) postProgress(v.duration, v.duration);
   player.lastReport = Date.now();
+});
+
+/* ---------------- card context menu & media deletion ---------------- */
+let ctxMenuEl = null;
+function closeCtxMenu() {
+  if (ctxMenuEl) { ctxMenuEl.remove(); ctxMenuEl = null; }
+}
+function openCtxMenu(x, y, it, cardEl) {
+  closeCtxMenu();
+  const m = document.createElement("div");
+  m.className = "ctxmenu";
+  const mk = (label, fn, danger) => {
+    const b = document.createElement("button");
+    b.textContent = label;
+    if (danger) b.className = "danger";
+    b.addEventListener("click", () => { closeCtxMenu(); fn(); });
+    m.appendChild(b);
+  };
+  mk("▶ 播放", () => openPlayer(it.Id));
+  mk("查看详情", () => openDetail(it.Id));
+  mk("收藏 / 取消收藏", () => toggleFavorite(it.Id, null));
+  mk("删除媒体", () => confirmDeleteMedia(it, cardEl), true);
+  document.body.appendChild(m);
+  const r = m.getBoundingClientRect();
+  m.style.left = Math.max(4, Math.min(x, window.innerWidth - r.width - 8)) + "px";
+  m.style.top = Math.max(4, Math.min(y, window.innerHeight - r.height - 8)) + "px";
+  ctxMenuEl = m;
+}
+document.addEventListener("pointerdown", e => {
+  if (ctxMenuEl && !ctxMenuEl.contains(e.target)) closeCtxMenu();
+});
+document.addEventListener("keydown", e => { if (e.key === "Escape") closeCtxMenu(); });
+
+function fmtBytes(n) {
+  if (!n) return "0 B";
+  const u = ["B", "KB", "MB", "GB", "TB"];
+  let i = 0;
+  while (n >= 1024 && i < u.length - 1) { n /= 1024; i++; }
+  return (i ? n.toFixed(1) : Math.round(n)) + " " + u[i];
+}
+let delTarget = null;
+async function confirmDeleteMedia(it, cardEl) {
+  try {
+    const prev = await api("/api/items/" + it.Id + "/delete-preview");
+    delTarget = { id: it.Id, cardEl: cardEl };
+    $("#delInfo").textContent = "「" + prev.Name + "」（" + prev.Type + "） · 共 " +
+      prev.FileCount + " 个文件 · " + fmtBytes(prev.TotalBytes);
+    const box = $("#delPaths");
+    box.innerHTML = "";
+    (prev.Paths || []).slice(0, 5).forEach(p => {
+      const d = document.createElement("div");
+      d.textContent = p;
+      box.appendChild(d);
+    });
+    if ((prev.Paths || []).length > 5) {
+      const d = document.createElement("div");
+      d.textContent = "… 共 " + prev.Paths.length + " 条路径";
+      box.appendChild(d);
+    }
+    openOverlay("deleteOverlay");
+  } catch (e) {
+    toast("无法删除：" + e.message);
+  }
+}
+$("#delCancel").addEventListener("click", () => { delTarget = null; closeOverlay("deleteOverlay"); });
+$("#delConfirm").addEventListener("click", async () => {
+  if (!delTarget) return;
+  const t = delTarget;
+  try {
+    await api("/api/items/" + t.id, { method: "DELETE" });
+    delTarget = null;
+    closeOverlay("deleteOverlay");
+    closeOverlay("detailOverlay");
+    if (t.cardEl && t.cardEl.isConnected) t.cardEl.remove();
+    toast("已删除");
+  } catch (e) {
+    toast("删除失败：" + e.message);
+  }
 });
 
 /* ---------------- overlays ---------------- */
@@ -978,18 +1119,22 @@ async function refreshTMDBSetting() {
     const input = $("#tmdbKey");
     input.value = "";
     input.placeholder = s.tmdbKeySet ? "已设置（输入新值可覆盖）" : "未设置";
+    $("#tmdbBase").value = s.tmdbBaseUrl || "";
   } catch (e) { /* keep placeholder */ }
 }
 $("#tmdbSave").addEventListener("click", async () => {
   try {
     const s = await api("/api/settings", {
       method: "PUT", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ tmdbApiKey: $("#tmdbKey").value.trim() })
+      body: JSON.stringify({
+        tmdbApiKey: $("#tmdbKey").value.trim(),
+        tmdbBaseUrl: $("#tmdbBase").value.trim()
+      })
     });
-    toast(s.tmdbKeySet ? "TMDB Key 已保存" : "TMDB Key 已清除");
+    toast(s.tmdbKeySet ? "TMDB 设置已保存" : "TMDB 设置已保存（Key 未设置）");
     refreshTMDBSetting();
   } catch (e) {
-    toast("保存 TMDB Key 失败：" + e.message);
+    toast("保存 TMDB 设置失败：" + e.message);
   }
 });
 

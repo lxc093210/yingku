@@ -222,3 +222,40 @@ func TestSettingsEndpoints(t *testing.T) {
 		t.Fatalf("settings after clear = %d %+v", code, out)
 	}
 }
+
+func TestSettingsBaseURL(t *testing.T) {
+	h := bareHandler(t)
+
+	var out settingsDTO
+	if code := get(t, h, "/api/settings", &out); code != 200 {
+		t.Fatalf("settings = %d", code)
+	}
+	if out.TMDBBaseURL != defaultTMDBBase {
+		t.Fatalf("default base = %q, want %q", out.TMDBBaseURL, defaultTMDBBase)
+	}
+	// Point at the user's key-injecting proxy; key stays unset and a
+	// key-only PUT afterwards must not disturb the base.
+	if code, body := doReq(t, h, http.MethodPut, "/api/settings",
+		`{"tmdbBaseUrl":"https://tmdb.example.com/"}`); code != 200 {
+		t.Fatalf("put base = %d %s", code, body)
+	}
+	if code := get(t, h, "/api/settings", &out); code != 200 || out.TMDBBaseURL != "https://tmdb.example.com" {
+		t.Fatalf("base after put = %d %+v", code, out)
+	}
+	if out.TMDBKeySet {
+		t.Errorf("key unexpectedly set")
+	}
+	if code, _ := doReq(t, h, http.MethodPut, "/api/settings", `{"tmdbApiKey":"K"}`); code != 200 {
+		t.Fatalf("put key = %d", code)
+	}
+	if code := get(t, h, "/api/settings", &out); code != 200 || out.TMDBBaseURL != "https://tmdb.example.com" || !out.TMDBKeySet {
+		t.Fatalf("settings after key put = %d %+v (base must survive)", code, out)
+	}
+	// Clearing the base restores the official default.
+	if code, _ := doReq(t, h, http.MethodPut, "/api/settings", `{"tmdbBaseUrl":""}`); code != 200 {
+		t.Fatalf("clear base = %d", code)
+	}
+	if code := get(t, h, "/api/settings", &out); code != 200 || out.TMDBBaseURL != defaultTMDBBase {
+		t.Fatalf("base after clear = %d %+v", code, out)
+	}
+}

@@ -15,7 +15,8 @@ import (
 // Store is a SQLite-backed repository. A single connection is used so the
 // PRAGMAs below apply to every query.
 type Store struct {
-	db *sql.DB
+	db   *sql.DB
+	path string
 }
 
 // Open creates (if needed) and migrates the database at path.
@@ -30,7 +31,7 @@ func Open(path string) (*Store, error) {
 		return nil, err
 	}
 	db.SetMaxOpenConns(1)
-	s := &Store{db: db}
+	s := &Store{db: db, path: path}
 	for _, p := range []string{
 		"PRAGMA journal_mode=WAL",
 		"PRAGMA cache_size=-20000", // ~20 MB page cache cap
@@ -66,6 +67,20 @@ func Open(path string) (*Store, error) {
 			return nil, fmt.Errorf("migrate user_data last_played_at: %w", err)
 		}
 	}
+	// Migration: images gained pixel dimensions (hero quality tiers).
+	for _, col := range []string{"width", "height"} {
+		has, err := columnExists(db, "images", col)
+		if err != nil {
+			db.Close()
+			return nil, fmt.Errorf("migrate images: %w", err)
+		}
+		if !has {
+			if _, err := db.Exec(`ALTER TABLE images ADD COLUMN ` + col + ` INTEGER NOT NULL DEFAULT 0`); err != nil {
+				db.Close()
+				return nil, fmt.Errorf("migrate images %s: %w", col, err)
+			}
+		}
+	}
 	return s, nil
 }
 
@@ -90,6 +105,9 @@ func columnExists(db *sql.DB, table, column string) (bool, error) {
 
 // Close closes the database.
 func (s *Store) Close() error { return s.db.Close() }
+
+// DBPath returns the database file path given to Open.
+func (s *Store) DBPath() string { return s.path }
 
 // DB exposes the raw handle (used by tests).
 func (s *Store) DB() *sql.DB { return s.db }
@@ -156,7 +174,9 @@ CREATE TABLE IF NOT EXISTS images (
   id        INTEGER PRIMARY KEY,
   item_id   INTEGER NOT NULL REFERENCES items(id) ON DELETE CASCADE,
   kind      TEXT NOT NULL, -- poster | backdrop
-  local_path TEXT NOT NULL
+  local_path TEXT NOT NULL,
+  width     INTEGER NOT NULL DEFAULT 0, -- pixels, 0 = unknown
+  height    INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS idx_img_item ON images(item_id);
 
