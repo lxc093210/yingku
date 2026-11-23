@@ -573,7 +573,7 @@ function makeCard(it) {
   d.className = "card";
   let inner = '<div class="pwrap">';
   if (it.HasPoster) {
-    inner += '<img loading="lazy" src="/api/items/' + it.Id + '/image/poster" alt="" onerror="this.remove()">';
+    inner += '<img loading="lazy" decoding="async" src="/api/items/' + it.Id + '/image/poster?w=320" alt="" onerror="this.remove()">';
   }
   inner += '<div class="fb" style="background:' + gradFor(it.Name) + '">' + esc(it.Name) + "</div>";
   inner += '<div class="veil">' + (it.CommunityRating ? '<span class="r">★ ' + it.CommunityRating.toFixed(1) + "</span> · " : "") + esc(it.Name) + "</div></div>";
@@ -590,9 +590,9 @@ function makeContinueCard(it) {
     ? Math.min(100, Math.max(1, Math.round(it.PlaybackPositionTicks / it.RunTimeTicks * 100))) : 0;
   let inner = '<div class="cwrap">';
   if (it.HasBackdrop) {
-    inner += '<img loading="lazy" src="/api/items/' + it.Id + '/image/backdrop" alt="" onerror="this.remove()">';
+    inner += '<img loading="lazy" decoding="async" src="/api/items/' + it.Id + '/image/backdrop?w=640" alt="" onerror="this.remove()">';
   } else if (it.HasPoster) {
-    inner += '<img loading="lazy" src="/api/items/' + it.Id + '/image/poster" alt="" onerror="this.remove()">';
+    inner += '<img loading="lazy" decoding="async" src="/api/items/' + it.Id + '/image/poster?w=320" alt="" onerror="this.remove()">';
   }
   inner += '<div class="fb" style="background:' + gradFor(it.SeriesName || it.Name) + '">' + esc(it.SeriesName || it.Name) + "</div>";
   if (pct > 0) inner += '<div class="pbar"><i style="width:' + pct + '%"></i></div>';
@@ -620,14 +620,14 @@ function makeLibCard(lib) {
   const thumbs = lib.Thumbs || [];
   let inner = '<div class="lmain">';
   if (thumbs.length) {
-    inner += '<img class="lbg" loading="lazy" src="/api/items/' + thumbs[0] + '/image/backdrop" alt="" onerror="if(!this.dataset.f){this.dataset.f=1;this.src=\'/api/items/' + thumbs[0] + '/image/poster\'}else{this.remove()}">';
+    inner += '<img class="lbg" loading="lazy" decoding="async" src="/api/items/' + thumbs[0] + '/image/backdrop?w=640" alt="" onerror="if(!this.dataset.f){this.dataset.f=1;this.src=\'/api/items/' + thumbs[0] + '/image/poster?w=640\'}else{this.remove()}">';
   }
   inner += '<div class="lshade" style="' + (thumbs.length ? "" : "background:" + gradFor(lib.Name)) + '"></div>';
   inner += '<div class="linfo"><div class="lname">' + esc(lib.Name) + '</div>' +
     '<div class="lkind">' + (KIND_EN[lib.Kind] || "MIXED") + "</div></div>";
   if (thumbs.length) {
     inner += '<div class="lstack">' + thumbs.slice(0, 3).map(id =>
-      '<img loading="lazy" src="/api/items/' + id + '/image/backdrop" alt="" onerror="if(!this.dataset.f){this.dataset.f=1;this.src=\'/api/items/' + id + '/image/poster\'}else{this.remove()}">').join("") + "</div>";
+      '<img loading="lazy" decoding="async" src="/api/items/' + id + '/image/backdrop?w=240" alt="" onerror="if(!this.dataset.f){this.dataset.f=1;this.src=\'/api/items/' + id + '/image/poster?w=240\'}else{this.remove()}">').join("") + "</div>";
   }
   inner += "</div>";
   inner += '<div class="lcap">' + esc(lib.Name) + "</div>";
@@ -903,7 +903,7 @@ function renderDetail(d, ctx) {
   const page = $("#detailPage");
   let h = "";
   if (d.HasBackdrop) {
-    h += '<div class="dback"><img src="/api/items/' + d.Id + '/image/backdrop-hi" alt="" onerror="this.remove()"><div class="dshade"></div></div>';
+    h += '<div class="dback"><img decoding="async" src="/api/items/' + d.Id + '/image/backdrop-hi" alt="" onerror="this.remove()"><div class="dshade"></div></div>';
   } else {
     h += '<div class="dback"><div class="dshade"></div></div>';
   }
@@ -912,7 +912,7 @@ function renderDetail(d, ctx) {
        '<button class="roundbtn" id="dHomeBtn" title="首页">⌂</button></div>';
   h += '<div class="dmain">';
   h += '<div class="dposter"><div class="pwrap2">';
-  if (d.HasPoster) h += '<img src="/api/items/' + d.Id + '/image/poster" alt="" onerror="this.remove()">';
+  if (d.HasPoster) h += '<img decoding="async" src="/api/items/' + d.Id + '/image/poster?w=342" alt="" onerror="this.remove()">';
   h += '<div class="fb" style="background:' + gradFor(d.Name) + '">' + esc(d.Name) + "</div></div></div>";
   h += '<div class="dinfo"><h1>' + esc(d.Name) + "</h1>";
   if (d.OriginalTitle) h += '<div class="orig">' + esc(d.OriginalTitle) + "</div>";
@@ -974,7 +974,7 @@ function renderDetail(d, ctx) {
     h += '<div class="dsec">播出季</div><div class="seasonrail">';
     d.Seasons.forEach(sn => {
       h += '<div class="scard" data-season="' + sn.Id + '"><div class="swrap">';
-      if (d.HasPoster) h += '<img loading="lazy" src="/api/items/' + d.Id + '/image/poster" alt="" onerror="this.remove()">';
+      if (d.HasPoster) h += '<img loading="lazy" decoding="async" src="/api/items/' + d.Id + '/image/poster?w=240" alt="" onerror="this.remove()">';
       h += '<div class="fb" style="background:' + gradFor(d.Name) + '">' + esc(sn.Name) + "</div>";
       h += '<span class="cntbadge">' + (sn.Episodes || []).length + " 集</span></div>";
       h += '<div class="snm">' + esc(sn.Name) + "</div></div>";
@@ -986,7 +986,7 @@ function renderDetail(d, ctx) {
     h += '<div class="dsec">演职人员</div><div class="cast">';
     d.People.forEach(p => {
       h += '<div class="person"><div class="pimg"><span>' + esc((p.Name || "?").slice(0, 1)) + "</span>" +
-        (p.ImageUrl ? '<img loading="lazy" src="' + esc(p.ImageUrl) + '" alt="" onerror="this.remove()">' : "") +
+        (p.ImageUrl ? '<img loading="lazy" decoding="async" src="' + esc(p.ImageUrl) + '" alt="" onerror="this.remove()">' : "") +
         '</div><div class="pn">' + esc(p.Name) + "</div>" +
         (p.Role ? '<div class="pr">' + esc(p.Role) + "</div>" : "") + "</div>";
     });

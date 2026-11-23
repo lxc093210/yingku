@@ -600,3 +600,57 @@ func TestFavoritesAndThumbs(t *testing.T) {
 		}
 	}
 }
+
+func TestFillItemMetaOnlyFillsEmpty(t *testing.T) {
+	st := openTempStore(t)
+	libID, err := st.CreateLibrary("补空库", "movie", []string{"/fill"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	mk := func(it *Item) int64 {
+		tx, err := st.Begin()
+		if err != nil {
+			t.Fatal(err)
+		}
+		it.LibraryID = libID
+		id, err := tx.UpsertItem(it)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := tx.Commit(); err != nil {
+			t.Fatal(err)
+		}
+		return id
+	}
+	// Fully empty item: everything is filled.
+	empty := mk(&Item{Type: "movie", Title: "空", SortTitle: "空", Path: "/fill/a"})
+	// Partially filled: local values must win, gaps are filled.
+	partial := mk(&Item{Type: "movie", Title: "半", SortTitle: "半", Path: "/fill/b",
+		Overview: "本地简介", Rating: 7.5})
+
+	for _, id := range []int64{empty, partial} {
+		if err := st.FillItemMeta(id, "TMDB 简介", 8.4, []string{"动作"}, 123); err != nil {
+			t.Fatal(err)
+		}
+	}
+	got, _ := st.GetItem(empty)
+	if got.Overview != "TMDB 简介" || got.Rating != 8.4 || got.RuntimeMin != 123 ||
+		len(got.Genres) != 1 || got.Genres[0] != "动作" {
+		t.Errorf("empty after fill = %+v", got)
+	}
+	got, _ = st.GetItem(partial)
+	if got.Overview != "本地简介" || got.Rating != 7.5 {
+		t.Errorf("partial overwritten = %q / %v", got.Overview, got.Rating)
+	}
+	if got.RuntimeMin != 123 || len(got.Genres) != 1 {
+		t.Errorf("partial gaps not filled = %d / %v", got.RuntimeMin, got.Genres)
+	}
+	// A second fill with different values changes nothing anywhere.
+	if err := st.FillItemMeta(empty, "别的", 1.0, []string{"其他"}, 1); err != nil {
+		t.Fatal(err)
+	}
+	got, _ = st.GetItem(empty)
+	if got.Overview != "TMDB 简介" || got.Rating != 8.4 || got.RuntimeMin != 123 {
+		t.Errorf("second fill overwrote = %+v", got)
+	}
+}

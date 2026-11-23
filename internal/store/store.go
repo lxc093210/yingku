@@ -669,6 +669,23 @@ func (s *Store) ImagePath(itemID int64, kind string) (string, error) {
 	return p, err
 }
 
+// FillItemMeta fills only the still-empty metadata fields of an item
+// (overview, rating, genres, runtime) from an external source such as
+// TMDB. Fields that already carry a value — e.g. from the local NFO —
+// are never overwritten; empty incoming values change nothing.
+func (s *Store) FillItemMeta(id int64, overview string, rating float64, genres []string, runtimeMin int) error {
+	genresJSON, _ := json.Marshal(genres)
+	_, err := s.db.Exec(`
+		UPDATE items SET
+			overview = CASE WHEN overview = '' THEN ? ELSE overview END,
+			rating = CASE WHEN rating = 0 THEN ? ELSE rating END,
+			genres = CASE WHEN genres = '' OR genres = '[]' OR genres = 'null' THEN ? ELSE genres END,
+			runtime_min = CASE WHEN runtime_min = 0 THEN ? ELSE runtime_min END
+		WHERE id = ?`,
+		overview, rating, string(genresJSON), runtimeMin, id)
+	return err
+}
+
 // GetSubtitle returns one subtitle row by id, or nil.
 func (s *Store) GetSubtitle(id int64) (*Subtitle, error) {
 	var sub Subtitle

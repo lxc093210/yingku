@@ -38,6 +38,7 @@ type Server struct {
 	scanner     *scan.Scanner
 	defaultRoot string
 	fsRoot      string
+	imgLocks    *keyedLocks
 }
 
 // New builds the HTTP handler.
@@ -49,7 +50,7 @@ func New(st *store.Store, scanner *scan.Scanner, defaultRoot string) http.Handle
 	if abs, err := filepath.Abs(fsRoot); err == nil {
 		fsRoot = filepath.Clean(abs)
 	}
-	s := &Server{st: st, scanner: scanner, defaultRoot: defaultRoot, fsRoot: fsRoot}
+	s := &Server{st: st, scanner: scanner, defaultRoot: defaultRoot, fsRoot: fsRoot, imgLocks: newKeyedLocks()}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/health", s.handleHealth)
 	mux.HandleFunc("GET /api/stats", s.handleStats)
@@ -279,38 +280,15 @@ func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleHome(w http.ResponseWriter, r *http.Request) {
-	hero, err := s.st.Hero()
-	if err != nil {
-		writeErr(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	recent, err := s.st.Recent(18)
-	if err != nil {
-		writeErr(w, http.StatusInternalServerError, err.Error())
-		return
-	}
+	// The Emby-style home page renders only the library cards and the
+	// continue-watching rail; the per-library "latest" rows come from
+	// the library items endpoint. Hero/Recent assembly used to dominate
+	// this handler's cost (~800ms on the live library) for data the UI
+	// never reads, so it is no longer computed here.
 	libs, err := s.st.ListLibraries()
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
-	}
-	var heroDTO *itemDTO
-	if hero != nil {
-		d := toDTO(hero)
-		heroDTO = &d
-	}
-	heroes, err := s.st.Heroes(5)
-	if err != nil {
-		writeErr(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	heroDTOs := make([]itemDTO, 0, len(heroes))
-	for _, it := range heroes {
-		heroDTOs = append(heroDTOs, toDTO(it))
-	}
-	recentDTOs := make([]itemDTO, 0, len(recent))
-	for _, it := range recent {
-		recentDTOs = append(recentDTOs, toDTO(it))
 	}
 	libDTOs := s.libraryDTOs(libs)
 	cont, err := s.st.ContinueWatching(defaultUserID, 12)
@@ -331,8 +309,7 @@ func (s *Server) handleHome(w http.ResponseWriter, r *http.Request) {
 		contDTOs = append(contDTOs, d)
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"Hero": heroDTO, "Heroes": heroDTOs, "Recent": recentDTOs, "Libraries": libDTOs,
-		"ContinueWatching": contDTOs,
+		"Libraries": libDTOs, "ContinueWatching": contDTOs,
 	})
 }
 
@@ -579,6 +556,26 @@ func (s *Server) handleItem(w http.ResponseWriter, r *http.Request) {
 	if it == nil {
 		writeErr(w, http.StatusNotFound, "item not found")
 		return
+	}
+	// Metadata lazy fill: for movies/series whose local metadata is
+	// incomplete (no overview or no rating), pull the TMDB details once
+	// and fill ONLY the empty fields — NFO values always win. The item
+	// is re-read afterwards so this very response carries the new data.
+	// Best-effort like the cast fill below: failures keep local data.
+	if (it.Type == "movie" || it.Type == "series") && it.TmdbID > 0 && (it.Overview == "" || it.Rating == 0) {
+		if cfg, cerr := s.tmdbCfg(); cerr == nil && cfg.available() {
+			kind := "movie"
+			if it.Type == "series" {
+				kind = "tv"
+			}
+			if ov, rating, genres, runtime, ferr := fetchTMDBDetails(cfg, kind, it.TmdbID); ferr == nil {
+				if uerr := s.st.FillItemMeta(it.ID, ov, rating, genres, runtime); uerr == nil {
+					if fresh, gerr := s.st.GetItem(it.ID); gerr == nil && fresh != nil {
+						it = fresh
+					}
+				}
+			}
+		}
 	}
 	d := toDTO(it)
 	switch it.Type {
@@ -1037,7 +1034,7 @@ func (s *Server) handleImage(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "bad image kind")
 		return
 	}
-	s.serveLocalImage(w, r, id, kind)
+	s.serveItemImage(w, r, id, kind)
 }
 
 // backdropCacheDir is <data dir>/cache/backdrops, derived from the DB

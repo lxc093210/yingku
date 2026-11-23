@@ -128,6 +128,86 @@ type tmdbImages struct {
 		Width    int    `json:"width"`
 		Height   int    `json:"height"`
 	} `json:"backdrops"`
+	Posters []struct {
+		FilePath    string  `json:"file_path"`
+		Width       int     `json:"width"`
+		VoteAverage float64 `json:"vote_average"`
+	} `json:"posters"`
+}
+
+// fetchTMDBArt picks the best poster and backdrop file_paths in a single
+// /images request: the poster with the highest vote average (ties broken
+// by width), and the widest backdrop. Either may be "" when TMDB has no
+// such artwork for the title.
+func fetchTMDBArt(cfg tmdbConfig, kind string, tmdbID int) (poster, backdrop string, err error) {
+	resp, err := cfg.get(tmdbClient, fmt.Sprintf("/%s/%d/images", kind, tmdbID))
+	if err != nil {
+		return "", "", err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return "", "", fmt.Errorf("tmdb images: status %d", resp.StatusCode)
+	}
+	var imgs tmdbImages
+	if err := json.NewDecoder(resp.Body).Decode(&imgs); err != nil {
+		return "", "", err
+	}
+	bestVote, bestPW := -1.0, -1
+	for _, p := range imgs.Posters {
+		if p.FilePath == "" {
+			continue
+		}
+		if p.VoteAverage > bestVote || (p.VoteAverage == bestVote && p.Width > bestPW) {
+			poster, bestVote, bestPW = p.FilePath, p.VoteAverage, p.Width
+		}
+	}
+	bestBW := -1
+	for _, b := range imgs.Backdrops {
+		if b.FilePath != "" && b.Width > bestBW {
+			backdrop, bestBW = b.FilePath, b.Width
+		}
+	}
+	return poster, backdrop, nil
+}
+
+type tmdbDetails struct {
+	Overview       string  `json:"overview"`
+	VoteAverage    float64 `json:"vote_average"`
+	Runtime        int     `json:"runtime"`          // movies
+	EpisodeRunTime []int   `json:"episode_run_time"` // series
+	Genres         []struct {
+		Name string `json:"name"`
+	} `json:"genres"`
+}
+
+// fetchTMDBDetails returns the fill-in metadata for a movie/series:
+// overview, community rating, genre names and runtime in minutes
+// (episode runtime for series). Language is zh-CN so filled overviews
+// and genre names match the library's predominantly Chinese metadata.
+func fetchTMDBDetails(cfg tmdbConfig, kind string, tmdbID int) (overview string, rating float64, genres []string, runtimeMin int, err error) {
+	resp, err := cfg.get(tmdbClient, fmt.Sprintf("/%s/%d?language=zh-CN", kind, tmdbID))
+	if err != nil {
+		return "", 0, nil, 0, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return "", 0, nil, 0, fmt.Errorf("tmdb details: status %d", resp.StatusCode)
+	}
+	var d tmdbDetails
+	if err := json.NewDecoder(resp.Body).Decode(&d); err != nil {
+		return "", 0, nil, 0, err
+	}
+	genres = []string{}
+	for _, g := range d.Genres {
+		if g.Name != "" {
+			genres = append(genres, g.Name)
+		}
+	}
+	runtimeMin = d.Runtime
+	if runtimeMin == 0 && len(d.EpisodeRunTime) > 0 {
+		runtimeMin = d.EpisodeRunTime[0]
+	}
+	return d.Overview, d.VoteAverage, genres, runtimeMin, nil
 }
 
 // fetchTMDBBackdrop picks the widest backdrop file_path for a movie or
@@ -158,7 +238,13 @@ func fetchTMDBBackdrop(cfg tmdbConfig, kind string, tmdbID int) (string, error) 
 
 // downloadTMDBImage fetches one image (original size) from the image CDN.
 func (c tmdbConfig) downloadBackdrop(filePath string) ([]byte, error) {
-	resp, err := tmdbDownloadClient.Get(c.imageBase + "/t/p/original" + filePath)
+	return c.downloadSized(filePath, "original")
+}
+
+// downloadSized fetches one image at a named TMDB size (w780, w1280,
+// original, ...) from the image CDN.
+func (c tmdbConfig) downloadSized(filePath, size string) ([]byte, error) {
+	resp, err := tmdbDownloadClient.Get(c.imageBase + "/t/p/" + size + filePath)
 	if err != nil {
 		return nil, err
 	}
