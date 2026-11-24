@@ -108,7 +108,7 @@ func (s *Scanner) launch(rootLabel string, libID int64, fn func() error) error {
 		s.mu.Unlock()
 		return fmt.Errorf("scan already running")
 	}
-	s.status = Status{State: "running", Root: rootLabel, LibraryID: libID, StartedAt: time.Now().Unix()}
+	s.status = Status{State: "running", Root: rootLabel, LibraryID: libID, StartedAt: time.Now().Unix(), WatchDirs: s.status.WatchDirs}
 	s.mu.Unlock()
 	go func() {
 		err := fn()
