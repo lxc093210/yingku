@@ -58,11 +58,14 @@ type Server struct {
 	doubanStopped string
 	// Batch 29: Alist client cache (rebuilt when the connection
 	// settings change) and the resolved raw_url cache (5 min TTL).
+	// Batch 29c: alistLocks serialises playback-time folder
+	// resolution per item.
 	alistMu     sync.Mutex
 	alistCli    *alist.Client
 	alistCliKey string
 	rawMu       sync.Mutex
 	rawCache    map[string]rawURLEntry
+	alistLocks  *keyedLocks
 }
 
 // New builds the HTTP handler.
@@ -74,7 +77,7 @@ func New(st *store.Store, scanner *scan.Scanner, defaultRoot string) http.Handle
 	if abs, err := filepath.Abs(fsRoot); err == nil {
 		fsRoot = filepath.Clean(abs)
 	}
-	s := &Server{st: st, scanner: scanner, defaultRoot: defaultRoot, fsRoot: fsRoot, imgLocks: newKeyedLocks(), running: map[string]bool{}, douban: meta.NewDoubanClient(), doubanBudget: doubanRoundBudget, rawCache: map[string]rawURLEntry{}}
+	s := &Server{st: st, scanner: scanner, defaultRoot: defaultRoot, fsRoot: fsRoot, imgLocks: newKeyedLocks(), running: map[string]bool{}, douban: meta.NewDoubanClient(), doubanBudget: doubanRoundBudget, rawCache: map[string]rawURLEntry{}, alistLocks: newKeyedLocks()}
 	// Batch 29: remote (Alist) library scans dispatch through the
 	// scanner into the API layer, which owns the Alist client and
 	// the TMDB detail fill.
@@ -1027,10 +1030,18 @@ func (s *Server) serveItemStream(w http.ResponseWriter, r *http.Request, id int6
 		return
 	}
 	if s.itemIsAlist(it) {
-		// Alist item (batch 29): the source path is a remote file
-		// path; resolve its raw playback URL. No local fallback —
-		// a resolution failure is a hard 502.
-		raw, err := s.alistRawURL(srcs[0].StrmPath)
+		// Alist item (batch 29): hand the source's file path to
+		// the raw-URL resolver. A folder-level source (batch 29c)
+		// is first resolved to its main file — the one moment an
+		// Alist folder listing is allowed, because a user just
+		// pressed play. No local fallback: any failure is a 502.
+		src, err := s.alistPlayableSource(it, srcs[0])
+		if err != nil {
+			log.Printf("stream: alist resolve item %d: %v", it.ID, err)
+			writeErr(w, http.StatusBadGateway, "alist playback resolve failed")
+			return
+		}
+		raw, err := s.alistRawURL(src.StrmPath)
 		if err != nil {
 			log.Printf("stream: alist resolve item %d: %v", it.ID, err)
 			writeErr(w, http.StatusBadGateway, "alist playback resolve failed")

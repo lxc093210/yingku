@@ -85,9 +85,28 @@ func stripAlistQualitySuffix(s string) (string, bool) {
 	return s, false
 }
 
+// alistPackTailRe matches the "N部" pack suffix of multi-film
+// bundles （哈利波特 8部， 叶问4部）: a digit run plus 部 at the very
+// end of the (normalised) name.
+var alistPackTailRe = regexp.MustCompile(`\d+\s*部\s*$`)
+
 // IsAlistCollectionFolder reports whether a folder name denotes a
-// collection （系列/合集） rather than a single title; remote scans
-// skip those.
+// collection （系列/合集/N部 packs) rather than a single title;
+// remote scans skip those.
 func IsAlistCollectionFolder(name string) bool {
-	return strings.Contains(name, "系列") || strings.Contains(name, "合集")
+	if strings.Contains(name, "系列") || strings.Contains(name, "合集") {
+		return true
+	}
+	s := alistNormalizer.Replace(name)
+	loc := alistPackTailRe.FindStringIndex(s)
+	if loc == nil {
+		return false
+	}
+	// 第N部 is ONE film (episode N of a series), not a pack.
+	if loc[0] > 0 {
+		if r, _ := utf8.DecodeLastRuneInString(s[:loc[0]]); r == '第' {
+			return false
+		}
+	}
+	return true
 }

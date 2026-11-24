@@ -792,6 +792,7 @@ func (s *Scanner) buildMoviePending(libID int64, ctx *folderCtx, strms, sidecars
 			Width: mi.Width, Height: mi.Height, VideoCodec: mi.VideoCodec,
 			HDR: mi.HDR, AudioSummary: mi.AudioSummary, MediaInfoSource: mi.Source,
 			StreamsJSON: streamsJSON(mi), SizeBytes: mi.Size, Bitrate: mi.Bitrate,
+			Resolved: true, // local sources always name a concrete file
 		})
 	}
 	if it.RuntimeMin == 0 {
@@ -1162,6 +1163,7 @@ func (s *Scanner) processEpisode(w *writer, index map[string]store.IndexEntry, s
 			Width: mi.Width, Height: mi.Height, VideoCodec: mi.VideoCodec,
 			HDR: mi.HDR, AudioSummary: mi.AudioSummary, MediaInfoSource: mi.Source,
 			StreamsJSON: streamsJSON(mi), SizeBytes: mi.Size, Bitrate: mi.Bitrate,
+			Resolved: true, // local sources always name a concrete file
 		}},
 		subs:   matchSubtitles(siblings, len(filterExt(siblings, ".strm")), []string{strm}),
 		people: actorsToPeople(epNFO),

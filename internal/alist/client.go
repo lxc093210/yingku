@@ -15,8 +15,9 @@ import (
 	"time"
 )
 
-// PoliteDelay is the minimum spacing between two API calls: remote
-// scans list thousands of folders and must not hammer the server.
+// PoliteDelay is the minimum spacing between two API calls: even
+// the few calls the model allows (root listings at scan time, one
+// folder listing + one get per play) must not hammer the server.
 const PoliteDelay = 150 * time.Millisecond
 
 // Entry is one row of an /api/fs/list response.

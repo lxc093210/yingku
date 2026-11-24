@@ -85,6 +85,12 @@ type MediaSource struct {
 	StreamsJSON string
 	SizeBytes   int64
 	Bitrate     int
+	// Resolved is false only for Alist sources written by the
+	// name-only scan (batch 29c): StrmPath then names the title
+	// FOLDER, and the concrete file is picked at playback time and
+	// written back with Resolved = true. Every local source and
+	// every pre-29c Alist source is resolved.
+	Resolved bool
 }
 
 // Subtitle is a sidecar subtitle file registered for an item.
@@ -457,14 +463,18 @@ func (t *Tx) ReplaceSources(itemID int64, sources []MediaSource) error {
 		return err
 	}
 	for _, ms := range sources {
+		resolved := 1
+		if !ms.Resolved {
+			resolved = 0
+		}
 		if _, err := t.tx.Exec(`
 			INSERT INTO media_sources(item_id, strm_path, target_url, width, height,
 				video_codec, hdr, audio_summary, mediainfo_source, streams_json,
-				size_bytes, bitrate)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+				size_bytes, bitrate, resolved)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 			itemID, ms.StrmPath, ms.TargetURL, ms.Width, ms.Height, ms.VideoCodec,
 			ms.HDR, ms.AudioSummary, ms.MediaInfoSource, ms.StreamsJSON,
-			ms.SizeBytes, ms.Bitrate); err != nil {
+			ms.SizeBytes, ms.Bitrate, resolved); err != nil {
 			return err
 		}
 	}
@@ -758,7 +768,7 @@ func (s *Store) Children(parentID int64) ([]*Item, error) {
 func (s *Store) SourcesOf(itemID int64) ([]MediaSource, error) {
 	rows, err := s.db.Query(`
 		SELECT id, item_id, strm_path, target_url, width, height, video_codec, hdr,
-			audio_summary, mediainfo_source, streams_json, size_bytes, bitrate
+			audio_summary, mediainfo_source, streams_json, size_bytes, bitrate, resolved
 		FROM media_sources WHERE item_id = ? ORDER BY id`, itemID)
 	if err != nil {
 		return nil, err
@@ -767,11 +777,13 @@ func (s *Store) SourcesOf(itemID int64) ([]MediaSource, error) {
 	var out []MediaSource
 	for rows.Next() {
 		var ms MediaSource
+		var resolved int
 		if err := rows.Scan(&ms.ID, &ms.ItemID, &ms.StrmPath, &ms.TargetURL, &ms.Width,
 			&ms.Height, &ms.VideoCodec, &ms.HDR, &ms.AudioSummary, &ms.MediaInfoSource,
-			&ms.StreamsJSON, &ms.SizeBytes, &ms.Bitrate); err != nil {
+			&ms.StreamsJSON, &ms.SizeBytes, &ms.Bitrate, &resolved); err != nil {
 			return nil, err
 		}
+		ms.Resolved = resolved != 0
 		out = append(out, ms)
 	}
 	return out, rows.Err()

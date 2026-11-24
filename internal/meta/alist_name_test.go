@@ -38,7 +38,21 @@ func TestIsAlistCollectionFolder(t *testing.T) {
 	if !IsAlistCollectionFolder("漫威合集") {
 		t.Error("漫威合集 should be a collection")
 	}
+	// "N部" multi-film packs are collections too.
+	for _, pack := range []string{"哈利波特 8部", "叶问4部", "变形金刚 6部", "复仇者联盟 4部"} {
+		if !IsAlistCollectionFolder(pack) {
+			t.Errorf("%s should be a collection (N部 pack)", pack)
+		}
+	}
 	if IsAlistCollectionFolder("12勇士 4K REMUX（2018）") {
 		t.Error("single title misclassified as collection")
+	}
+	// 部 inside a title (no leading digit run at the end) is fine.
+	if IsAlistCollectionFolder("第一部 4K REMUX（2020）") {
+		t.Error("第一部 misclassified as collection")
+	}
+	// 第N部 is a single film (episode N), not a pack.
+	if IsAlistCollectionFolder("星球大战 第9部") {
+		t.Error("第9部 misclassified as collection")
 	}
 }

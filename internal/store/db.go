@@ -57,11 +57,18 @@ func Open(path string) (*Store, error) {
 		return nil, fmt.Errorf("migrate library_paths: %w", err)
 	}
 	// Migration: media_sources gained the full stream payload
-	// (streams_json/size_bytes/bitrate) for rich client media info.
+	// (streams_json/size_bytes/bitrate) for rich client media info,
+	// and later a resolved flag (batch 29c): Alist sources are
+	// scanned from the folder NAME alone (resolved = 0, strm_path =
+	// the folder) and only resolved to a concrete file at playback
+	// time. The default 1 keeps every pre-existing row — all local
+	// sources and old-model Alist sources whose strm_path already
+	// names a file — resolved, as they are.
 	for _, col := range []struct{ name, ddl string }{
 		{"streams_json", `ALTER TABLE media_sources ADD COLUMN streams_json TEXT NOT NULL DEFAULT ''`},
 		{"size_bytes", `ALTER TABLE media_sources ADD COLUMN size_bytes INTEGER NOT NULL DEFAULT 0`},
 		{"bitrate", `ALTER TABLE media_sources ADD COLUMN bitrate INTEGER NOT NULL DEFAULT 0`},
+		{"resolved", `ALTER TABLE media_sources ADD COLUMN resolved INTEGER NOT NULL DEFAULT 1`},
 	} {
 		has, err := columnExists(db, "media_sources", col.name)
 		if err != nil {
@@ -308,7 +315,8 @@ CREATE TABLE IF NOT EXISTS media_sources (
   mediainfo_source TEXT NOT NULL DEFAULT 'none', -- json | filename | none | probe
   streams_json     TEXT NOT NULL DEFAULT '',
   size_bytes       INTEGER NOT NULL DEFAULT 0,
-  bitrate          INTEGER NOT NULL DEFAULT 0
+  bitrate          INTEGER NOT NULL DEFAULT 0,
+  resolved         INTEGER NOT NULL DEFAULT 1  -- batch 29c: 0 = Alist folder-level source, resolved to a file at playback time
 );
 CREATE INDEX IF NOT EXISTS idx_ms_item ON media_sources(item_id);
 

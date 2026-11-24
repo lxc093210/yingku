@@ -26,7 +26,43 @@ type fakeEntry struct {
 // fakeAlistTree maps remote dir paths to their entries.
 type fakeAlistTree map[string][]fakeEntry
 
+// alistCallCounts records every List (by path) and Get call a fake
+// Alist server receives, so tests can pin the batch-29c discipline:
+// scans list ONLY the root; folders are listed once, at playback.
+type alistCallCounts struct {
+	mu    sync.Mutex
+	lists map[string]int
+	gets  int
+}
+
+func (c *alistCallCounts) listFor(p string) int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.lists[p]
+}
+
+func (c *alistCallCounts) listTotal() int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	n := 0
+	for _, v := range c.lists {
+		n += v
+	}
+	return n
+}
+
+func (c *alistCallCounts) getTotal() int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.gets
+}
+
 func fakeAlistServer(t *testing.T, tree fakeAlistTree) *httptest.Server {
+	t.Helper()
+	return fakeAlistServerCounted(t, tree, nil)
+}
+
+func fakeAlistServerCounted(t *testing.T, tree fakeAlistTree, counts *alistCallCounts) *httptest.Server {
 	t.Helper()
 	mux := http.NewServeMux()
 	writeEnv := func(w http.ResponseWriter, code int, data any) {
@@ -60,6 +96,14 @@ func fakeAlistServer(t *testing.T, tree fakeAlistTree) *httptest.Server {
 			Path string `json:"path"`
 		}
 		_ = json.NewDecoder(r.Body).Decode(&body)
+		if counts != nil {
+			counts.mu.Lock()
+			if counts.lists == nil {
+				counts.lists = map[string]int{}
+			}
+			counts.lists[body.Path]++
+			counts.mu.Unlock()
+		}
 		entries, ok := tree[body.Path]
 		if !ok {
 			writeEnv(w, 500, nil)
@@ -75,6 +119,11 @@ func fakeAlistServer(t *testing.T, tree fakeAlistTree) *httptest.Server {
 			Path string `json:"path"`
 		}
 		_ = json.NewDecoder(r.Body).Decode(&body)
+		if counts != nil {
+			counts.mu.Lock()
+			counts.gets++
+			counts.mu.Unlock()
+		}
 		writeEnv(w, 200, map[string]any{"raw_url": "https://cdn.test" + body.Path + "?sign=abc"})
 	})
 	srv := httptest.NewServer(mux)
@@ -238,7 +287,8 @@ func TestAlistRemoteScanIntegration(t *testing.T) {
 			{Name: "007大破天幕杀机.mkv", Size: 8_000_000_000},
 		},
 	}
-	alistSrv := fakeAlistServer(t, tree)
+	counts := &alistCallCounts{}
+	alistSrv := fakeAlistServerCounted(t, tree, counts)
 	tmdbSrv := fakeTMDBServer(t)
 
 	st, err := store.Open(filepath.Join(t.TempDir(), "test.db"))
@@ -271,6 +321,14 @@ func TestAlistRemoteScanIntegration(t *testing.T) {
 		t.Errorf("scan status = items %d skipped %d, want items 2 skipped 1 (collection)",
 			status.Items, status.Skipped)
 	}
+	// Batch 29c discipline: the scan listed ONLY the root (one
+	// page here), never a title folder, and never called Get.
+	if counts.listTotal() != 1 || counts.listFor(root) != 1 {
+		t.Errorf("scan list calls = %v total, want exactly 1 (root)", counts.listTotal())
+	}
+	if counts.getTotal() != 0 {
+		t.Errorf("scan get calls = %d, want 0", counts.getTotal())
+	}
 	items, _, err := st.ListTopLevel(libID, "", "", 50)
 	if err != nil {
 		t.Fatal(err)
@@ -301,11 +359,20 @@ func TestAlistRemoteScanIntegration(t *testing.T) {
 		t.Fatalf("信条 sources = %v, %v", srcs, err)
 	}
 	src := srcs[0]
-	if src.StrmPath != root+"/"+tenetFolder+"/"+tenetFile {
-		t.Errorf("source path = %q (largest video file must win)", src.StrmPath)
+	// Batch 29c: the scan writes a FOLDER-level source — it never
+	// listed inside the folder. Quality comes from the folder name
+	// alone (4K → 3840x2160), size stays unknown until playback.
+	if src.StrmPath != root+"/"+tenetFolder {
+		t.Errorf("source path = %q, want the folder itself", src.StrmPath)
+	}
+	if src.Resolved {
+		t.Error("freshly scanned source must be unresolved")
 	}
 	if src.TargetURL != "" || src.MediaInfoSource != "filename" || src.Width != 3840 || src.Height != 2160 {
 		t.Errorf("source = %+v", src)
+	}
+	if src.SizeBytes != 0 {
+		t.Errorf("source size = %d, want 0 (folder never listed)", src.SizeBytes)
 	}
 	unmatched := byTitle["无名之辈"]
 	if unmatched == nil {
@@ -315,7 +382,8 @@ func TestAlistRemoteScanIntegration(t *testing.T) {
 		t.Errorf("无名之辈 = tmdb %d year %d, want tmdb 0 year 2018 (unmatched but入库)", unmatched.TmdbID, unmatched.Year)
 	}
 
-	// Rescan: fingerprints unchanged → both items skipped, none rewritten.
+	// Rescan: name fingerprints unchanged → both items skipped,
+	// none rewritten; the rescan again lists ONLY the root.
 	if err := sc.ScanLibraryByID(libID); err != nil {
 		t.Fatalf("rescan: %v", err)
 	}
@@ -326,9 +394,20 @@ func TestAlistRemoteScanIntegration(t *testing.T) {
 		t.Errorf("after rescan status = items %d skipped %d, want items 2 skipped 4",
 			status.Items, status.Skipped)
 	}
+	if counts.listTotal() != 2 || counts.listFor(root) != 2 || counts.getTotal() != 0 {
+		t.Errorf("after rescan: lists=%d (root %d) gets=%d, want 2 root lists, 0 gets",
+			counts.listTotal(), counts.listFor(root), counts.getTotal())
+	}
+	srcs, err = st.SourcesOf(tenet.ID)
+	if err != nil || len(srcs) != 1 || srcs[0].Resolved {
+		t.Fatalf("信条 source after rescan = %+v, %v; want still unresolved", srcs, err)
+	}
 
-	// Playback: the web stream endpoint 302s to the raw URL.
-	wantRaw := "https://cdn.test" + root + "/" + tenetFolder + "/" + tenetFile + "?sign=abc"
+	// Playback: the first play resolves the folder (exactly one
+	// List of the item's own folder + one Get), writes the file
+	// back as resolved, and 302s to the raw URL.
+	tenetPath := root + "/" + tenetFolder
+	wantRaw := "https://cdn.test" + tenetPath + "/" + tenetFile + "?sign=abc"
 	for _, url := range []string{
 		fmt.Sprintf("/api/items/%d/stream", tenet.ID),
 		fmt.Sprintf("/emby/Videos/%d/stream", tenet.ID),
@@ -351,6 +430,36 @@ func TestAlistRemoteScanIntegration(t *testing.T) {
 	}
 	if len(pb.MediaSources) != 1 || pb.MediaSources[0].Path != wantRaw {
 		t.Errorf("PlaybackInfo sources = %+v, want Path %q", pb.MediaSources, wantRaw)
+	}
+	// Across all three playback calls: the folder was listed
+	// exactly once (the first play) and Get ran exactly once (the
+	// raw_url cache covers the rest).
+	if got := counts.listFor(tenetPath); got != 1 {
+		t.Errorf("folder list calls = %d, want exactly 1", got)
+	}
+	if got := counts.getTotal(); got != 1 {
+		t.Errorf("get calls = %d, want exactly 1", got)
+	}
+	// The resolution was written back: concrete file, real size,
+	// media info re-inferred from the file name.
+	srcs, err = st.SourcesOf(tenet.ID)
+	if err != nil || len(srcs) != 1 {
+		t.Fatalf("信条 sources after play = %v, %v", srcs, err)
+	}
+	src = srcs[0]
+	if !src.Resolved || src.StrmPath != tenetPath+"/"+tenetFile {
+		t.Errorf("resolved source = %+v", src)
+	}
+	if src.SizeBytes != 50_000_000_000 || src.Width != 3840 || src.Height != 2160 {
+		t.Errorf("resolved source media info = %+v", src)
+	}
+	// The unplayed item stays unresolved and was never listed.
+	if got := counts.listFor(root + "/无名之辈 4K REMUX（2018）"); got != 0 {
+		t.Errorf("unplayed folder listed %d times, want 0", got)
+	}
+	srcs, err = st.SourcesOf(unmatched.ID)
+	if err != nil || len(srcs) != 1 || srcs[0].Resolved {
+		t.Errorf("无名之辈 source = %+v, %v; want still unresolved", srcs, err)
 	}
 }
 
@@ -495,5 +604,159 @@ func TestAlistScanPrepDoesNotHoldStoreConnection(t *testing.T) {
 	}
 	if len(items) != 2 {
 		t.Errorf("items in store = %d, want 2", len(items))
+	}
+}
+
+// TestAlistPlaybackPackFolderFails: a folder that slipped past the
+// name filter but contains only subdirectories (a collection pack
+// by content) scans in as an item, yet playing it must fail with
+// 502 and leave the source unresolved — one folder List is all the
+// API traffic it may cause.
+func TestAlistPlaybackPackFolderFails(t *testing.T) {
+	const root = "/电影/4K REMUX"
+	const pack = "三部曲精选 4K REMUX（2020）"
+	tree := fakeAlistTree{
+		root: {
+			{Name: pack, IsDir: true},
+		},
+		root + "/" + pack: {
+			{Name: "第一部", IsDir: true},
+			{Name: "第二部", IsDir: true},
+			{Name: "第三部", IsDir: true},
+		},
+	}
+	counts := &alistCallCounts{}
+	alistSrv := fakeAlistServerCounted(t, tree, counts)
+	tmdbSrv := fakeTMDBServer(t)
+
+	st, err := store.Open(filepath.Join(t.TempDir(), "test.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { st.Close() })
+	for k, v := range map[string]string{
+		settingAlistBaseURL:  alistSrv.URL,
+		settingAlistUsername: "dav",
+		settingAlistPassword: "pw",
+		settingTMDBBaseURL:   tmdbSrv.URL,
+	} {
+		if err := st.SetSetting(k, v); err != nil {
+			t.Fatal(err)
+		}
+	}
+	libID, err := st.CreateLibraryWithType("4K REMUX", "movie", store.SourceTypeAlist, []string{root})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sc := scan.New(st)
+	h := New(st, sc, t.TempDir())
+
+	if err := sc.ScanLibraryByID(libID); err != nil {
+		t.Fatalf("remote scan: %v", err)
+	}
+	items, _, err := st.ListTopLevel(libID, "", "", 50)
+	if err != nil || len(items) != 1 {
+		t.Fatalf("items = %v, %v; want 1", items, err)
+	}
+	req := httptest.NewRequest(http.MethodGet, fmt.Sprintf("/api/items/%d/stream", items[0].ID), nil)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusBadGateway {
+		t.Errorf("pack playback = %d, want 502", rec.Code)
+	}
+	if got := counts.listFor(root + "/" + pack); got != 1 {
+		t.Errorf("pack folder list calls = %d, want exactly 1 (the failed resolve)", got)
+	}
+	srcs, err := st.SourcesOf(items[0].ID)
+	if err != nil || len(srcs) != 1 || srcs[0].Resolved {
+		t.Errorf("pack source = %+v, %v; want still unresolved", srcs, err)
+	}
+}
+
+// TestAlistRescanKeepsResolvedSource: an old-model item (batch 29
+// original scan: source already points at a concrete file) must
+// survive a batch-29c rescan untouched — never downgraded to an
+// unresolved folder-level source.
+func TestAlistRescanKeepsResolvedSource(t *testing.T) {
+	const root = "/电影/4K REMUX"
+	const tenetFolder = "信条 4K REMUX（2020）"
+	const tenetFile = "Tenet.2020.2160p.UHD.BluRay.REMUX.HEVC.TrueHD.Atmos.mkv"
+	tree := fakeAlistTree{
+		root: {
+			{Name: tenetFolder, IsDir: true},
+		},
+	}
+	counts := &alistCallCounts{}
+	alistSrv := fakeAlistServerCounted(t, tree, counts)
+	tmdbSrv := fakeTMDBServer(t)
+
+	st, err := store.Open(filepath.Join(t.TempDir(), "test.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { st.Close() })
+	for k, v := range map[string]string{
+		settingAlistBaseURL:  alistSrv.URL,
+		settingAlistUsername: "dav",
+		settingAlistPassword: "pw",
+		settingTMDBBaseURL:   tmdbSrv.URL,
+	} {
+		if err := st.SetSetting(k, v); err != nil {
+			t.Fatal(err)
+		}
+	}
+	libID, err := st.CreateLibraryWithType("4K REMUX", "movie", store.SourceTypeAlist, []string{root})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Seed an old-model item by hand: file-level resolved source,
+	// old-format fingerprint.
+	folderPath := root + "/" + tenetFolder
+	tx, err := st.Begin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	itemID, err := tx.UpsertItem(&store.Item{
+		LibraryID: libID, Type: "movie", Title: "信条", Year: 2020,
+		TmdbID: 577922, Path: folderPath, SortTitle: "信条",
+		Fingerprint: "old-model-fingerprint", DateAdded: 1234,
+		CreatedAt: 1234, UpdatedAt: 1234,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := tx.ReplaceSources(itemID, []store.MediaSource{{
+		StrmPath: folderPath + "/" + tenetFile, MediaInfoSource: "filename",
+		Width: 3840, Height: 2160, SizeBytes: 50_000_000_000, Resolved: true,
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatal(err)
+	}
+
+	sc := scan.New(st)
+	_ = New(st, sc, t.TempDir()) // wires scanner.RemoteScan
+	if err := sc.ScanLibraryByID(libID); err != nil {
+		t.Fatalf("rescan: %v", err)
+	}
+	if counts.listTotal() != 1 || counts.listFor(root) != 1 || counts.getTotal() != 0 {
+		t.Errorf("rescan calls: lists=%d gets=%d, want 1 root list, 0 gets",
+			counts.listTotal(), counts.getTotal())
+	}
+	it, err := st.GetItem(itemID)
+	if err != nil || it == nil {
+		t.Fatalf("item after rescan: %v, %v", it, err)
+	}
+	if it.Fingerprint != "old-model-fingerprint" {
+		t.Errorf("item was rewritten by rescan: fingerprint = %q", it.Fingerprint)
+	}
+	srcs, err := st.SourcesOf(itemID)
+	if err != nil || len(srcs) != 1 {
+		t.Fatalf("sources = %v, %v", srcs, err)
+	}
+	if !srcs[0].Resolved || srcs[0].StrmPath != folderPath+"/"+tenetFile || srcs[0].SizeBytes != 50_000_000_000 {
+		t.Errorf("source downgraded by rescan: %+v", srcs[0])
 	}
 }
