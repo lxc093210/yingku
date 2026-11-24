@@ -22,6 +22,7 @@ import (
 	"sync"
 	"time"
 
+	"yingku/internal/meta"
 	"yingku/internal/scan"
 	"yingku/internal/store"
 	"yingku/internal/web"
@@ -44,6 +45,15 @@ type Server struct {
 	imgLocks    *keyedLocks
 	bfMu        sync.Mutex
 	bf          backfillState
+	// Batch 28: run locks for scheduled jobs and cover generation
+	// (keys "job:<name>" and "cover"), plus the job scheduler.
+	runMu   sync.Mutex
+	running map[string]bool
+	// Batch 28: Douban assist client + its per-round gate.
+	douban        *meta.DoubanClient
+	doubanMu      sync.Mutex
+	doubanBudget  int
+	doubanStopped string
 }
 
 // New builds the HTTP handler.
@@ -55,7 +65,7 @@ func New(st *store.Store, scanner *scan.Scanner, defaultRoot string) http.Handle
 	if abs, err := filepath.Abs(fsRoot); err == nil {
 		fsRoot = filepath.Clean(abs)
 	}
-	s := &Server{st: st, scanner: scanner, defaultRoot: defaultRoot, fsRoot: fsRoot, imgLocks: newKeyedLocks()}
+	s := &Server{st: st, scanner: scanner, defaultRoot: defaultRoot, fsRoot: fsRoot, imgLocks: newKeyedLocks(), running: map[string]bool{}, douban: meta.NewDoubanClient(), doubanBudget: doubanRoundBudget}
 	// A key (and the stable server id) exist from first start so the
 	// settings page always has something usable to show/copy.
 	_, _ = s.ensureAPIKey()
@@ -67,6 +77,8 @@ func New(st *store.Store, scanner *scan.Scanner, defaultRoot string) http.Handle
 	mux.HandleFunc("GET /api/favorites", s.handleFavorites)
 	mux.HandleFunc("GET /api/libraries", s.handleLibraries)
 	mux.HandleFunc("POST /api/libraries", s.handleLibraryCreate)
+	mux.HandleFunc("PUT /api/libraries/order", s.handleLibraryOrder)
+	mux.HandleFunc("GET /api/libraries/{id}/image", s.handleLibraryImage)
 	mux.HandleFunc("GET /api/libraries/{id}", s.handleLibraryGet)
 	mux.HandleFunc("PUT /api/libraries/{id}", s.handleLibraryUpdate)
 	mux.HandleFunc("DELETE /api/libraries/{id}", s.handleLibraryDelete)
@@ -185,12 +197,20 @@ func New(st *store.Store, scanner *scan.Scanner, defaultRoot string) http.Handle
 	mux.HandleFunc("DELETE /emby/Users/{userId}/PlayedItems/{itemId}", s.handlePlayedItems)
 	mux.HandleFunc("DELETE /Users/{userId}/PlayedItems/{itemId}", s.handlePlayedItems)
 	mux.HandleFunc("GET /api/search", s.handleSearch)
+	// Scheduled jobs + integrated cover generation (batch 28).
+	mux.HandleFunc("GET /api/jobs", s.handleJobsList)
+	mux.HandleFunc("PUT /api/jobs/{name}", s.handleJobUpdate)
+	mux.HandleFunc("POST /api/jobs/{name}/run", s.handleJobRun)
+	mux.HandleFunc("GET /api/cover", s.handleCoverGet)
+	mux.HandleFunc("PUT /api/cover", s.handleCoverPut)
+	mux.HandleFunc("POST /api/cover/generate", s.handleCoverGenerate)
 	mux.HandleFunc("GET /api/fs/list", s.handleFSList)
 	mux.HandleFunc("POST /api/maintenance/tmdb-backfill", s.handleBackfillStart)
 	mux.HandleFunc("GET /api/maintenance/tmdb-backfill/status", s.handleBackfillStatus)
 	mux.HandleFunc("POST /api/scan", s.handleScanStart)
 	mux.HandleFunc("GET /api/scan/status", s.handleScanStatus)
 	mux.HandleFunc("/", s.handleUI)
+	go s.jobLoop()
 	return s.logMiddleware(s.authMiddleware(mux))
 }
 
@@ -582,7 +602,7 @@ func (s *Server) handleLibraryDelete(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "bad library id")
 		return
 	}
-	err = s.st.DeleteLibrary(id)
+	removed, err := s.st.DeleteLibraryDeep(id)
 	if errors.Is(err, sql.ErrNoRows) {
 		writeErr(w, http.StatusNotFound, "library not found")
 		return
@@ -591,7 +611,46 @@ func (s *Server) handleLibraryDelete(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	s.purgeItemCaches(removed)
 	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+}
+
+// handleLibraryOrder rewrites the library display order from the
+// posted id sequence (batch 28: settings-page ↑↓ buttons).
+func (s *Server) handleLibraryOrder(w http.ResponseWriter, r *http.Request) {
+	var p struct {
+		IDs []int64 `json:"ids"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&p); err != nil {
+		writeErr(w, http.StatusBadRequest, "invalid JSON body")
+		return
+	}
+	if len(p.IDs) == 0 {
+		writeErr(w, http.StatusBadRequest, "ids is required")
+		return
+	}
+	if err := s.st.SetLibraryOrder(p.IDs); err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	libs, err := s.st.ListLibraries()
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, s.libraryDTOs(libs))
+}
+
+// handleLibraryImage serves the library cover for the web UI — the
+// same serveLibraryImage the Emby route uses (uploaded/generated
+// cover first, then the collage), with ?w= thumbnails.
+func (s *Server) handleLibraryImage(w http.ResponseWriter, r *http.Request) {
+	id, err := pathID(r)
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, "bad library id")
+		return
+	}
+	s.serveLibraryImage(w, r, id, parseImageWidth(r))
 }
 
 func (s *Server) handleLibraryScan(w http.ResponseWriter, r *http.Request) {
@@ -697,6 +756,16 @@ func (s *Server) handleItem(w http.ResponseWriter, r *http.Request) {
 						it = fresh
 					}
 				}
+			}
+		}
+	}
+	// Douban assist (batch 28): only when TMDB left the title
+	// non-Chinese or the overview empty — when TMDB has Chinese
+	// data, Douban is never consulted.
+	if (it.Type == "movie" || it.Type == "series") && it.TmdbID > 0 && (!hasHan(it.Title) || it.Overview == "") {
+		if s.applyDouban(it) {
+			if fresh, gerr := s.st.GetItem(it.ID); gerr == nil && fresh != nil {
+				it = fresh
 			}
 		}
 	}
@@ -1022,6 +1091,7 @@ type settingsDTO struct {
 	TMDBKeySet      bool   `json:"tmdbKeySet"`
 	TMDBBaseURL     string `json:"tmdbBaseUrl"`
 	APIAuthRequired bool   `json:"apiAuthRequired"`
+	DoubanAssist    bool   `json:"doubanAssist"`
 }
 
 func (s *Server) settingsDTO() (settingsDTO, error) {
@@ -1035,6 +1105,7 @@ func (s *Server) settingsDTO() (settingsDTO, error) {
 		TMDBKeySet:      cfg.key != "",
 		TMDBBaseURL:     cfg.base,
 		APIAuthRequired: s.authRequired(),
+		DoubanAssist:    s.doubanAssistEnabled(),
 	}, nil
 }
 
@@ -1053,6 +1124,7 @@ func (s *Server) handleSettingsPut(w http.ResponseWriter, r *http.Request) {
 		TMDBAPIKey      *string `json:"tmdbApiKey"`
 		TMDBBaseURL     *string `json:"tmdbBaseUrl"`
 		APIAuthRequired *bool   `json:"apiAuthRequired"`
+		DoubanAssist    *bool   `json:"doubanAssist"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&p); err != nil {
 		writeErr(w, http.StatusBadRequest, "invalid JSON body")
@@ -1064,7 +1136,12 @@ func (s *Server) handleSettingsPut(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	if p.TMDBBaseURL != nil {
+	// An empty base URL never overwrites the stored one (batch 28):
+	// the settings page loads the field asynchronously, and a save
+	// issued before the load landed used to wipe a configured proxy
+	// base. Clearing the base is therefore no longer possible via an
+	// empty value — send the official default to reset it instead.
+	if p.TMDBBaseURL != nil && strings.TrimSpace(*p.TMDBBaseURL) != "" {
 		base := strings.TrimRight(strings.TrimSpace(*p.TMDBBaseURL), "/")
 		if base == defaultTMDBBase {
 			base = "" // the official default needs no stored override
@@ -1081,6 +1158,16 @@ func (s *Server) handleSettingsPut(w http.ResponseWriter, r *http.Request) {
 		}
 		// An empty value deletes the row, which reads back as "off".
 		if err := s.st.SetSetting(settingAPIAuthRequired, v); err != nil {
+			writeErr(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+	}
+	if p.DoubanAssist != nil {
+		v := "false"
+		if *p.DoubanAssist {
+			v = "true"
+		}
+		if err := s.st.SetSetting(settingDoubanAssist, v); err != nil {
 			writeErr(w, http.StatusInternalServerError, err.Error())
 			return
 		}

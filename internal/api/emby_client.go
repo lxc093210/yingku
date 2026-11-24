@@ -252,18 +252,18 @@ func (s *Server) handleItemCounts(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"MovieCount":   counts["movie"],
-		"SeriesCount":  counts["series"],
-		"EpisodeCount": counts["episode"],
-		"ArtistCount":  0,
-		"AlbumCount":   0,
-		"SongCount":    0,
-		"GameCount":    0,
+		"MovieCount":      counts["movie"],
+		"SeriesCount":     counts["series"],
+		"EpisodeCount":    counts["episode"],
+		"ArtistCount":     0,
+		"AlbumCount":      0,
+		"SongCount":       0,
+		"GameCount":       0,
 		"GameSystemCount": 0,
-		"TrailerCount": 0,
+		"TrailerCount":    0,
 		"MusicVideoCount": 0,
-		"BoxSetCount":  0,
-		"BookCount":    0,
+		"BoxSetCount":     0,
+		"BookCount":       0,
 	})
 }
 

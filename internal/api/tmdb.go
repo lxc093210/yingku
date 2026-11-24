@@ -8,8 +8,8 @@ import (
 	"net/url"
 	"sort"
 	"strings"
-	"unicode"
 	"time"
+	"unicode"
 
 	"yingku/internal/store"
 )
@@ -192,6 +192,30 @@ func fetchTMDBEpisodeStill(cfg tmdbConfig, tmdbID, seasonNum, episodeNum int) (s
 		return "", err
 	}
 	return ep.StillPath, nil
+}
+
+type tmdbSeason struct {
+	PosterPath string `json:"poster_path"`
+}
+
+// fetchTMDBSeasonPoster returns the poster file_path for one season
+// of a series ("" when TMDB has no season poster). Used by the
+// per-season poster fallback chain (batch 28): season-dir poster →
+// series-root seasonNN-poster → TMDB season poster → series poster.
+func fetchTMDBSeasonPoster(cfg tmdbConfig, tmdbID, seasonNum int) (string, error) {
+	resp, err := cfg.get(tmdbClient, fmt.Sprintf("/tv/%d/season/%d", tmdbID, seasonNum))
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("tmdb season: status %d", resp.StatusCode)
+	}
+	var sn tmdbSeason
+	if err := json.NewDecoder(resp.Body).Decode(&sn); err != nil {
+		return "", err
+	}
+	return sn.PosterPath, nil
 }
 
 type tmdbDetails struct {

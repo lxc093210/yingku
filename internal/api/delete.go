@@ -1,7 +1,6 @@
 package api
 
 import (
-	"database/sql"
 	"errors"
 	"io/fs"
 	"net/http"
@@ -225,13 +224,15 @@ func (s *Server) handleItemDelete(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	if err := s.st.DeleteItem(it.ID); err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			writeErr(w, http.StatusNotFound, "item not found")
-			return
-		}
+	removed, err := s.st.DeleteItemDeep(it.ID)
+	if err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	if len(removed) == 0 {
+		writeErr(w, http.StatusNotFound, "item not found")
+		return
+	}
+	s.purgeItemCaches(removed)
 	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
 }

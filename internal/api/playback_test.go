@@ -251,11 +251,20 @@ func TestSettingsBaseURL(t *testing.T) {
 	if code := get(t, h, "/api/settings", &out); code != 200 || out.TMDBBaseURL != "https://tmdb.example.com" || !out.TMDBKeySet {
 		t.Fatalf("settings after key put = %d %+v (base must survive)", code, out)
 	}
-	// Clearing the base restores the official default.
+	// Batch 28: an empty base no longer clears the stored value (a
+	// settings page that saves before the current value has loaded
+	// must not wipe it). Resetting is done by sending the official
+	// default explicitly.
 	if code, _ := doReq(t, h, http.MethodPut, "/api/settings", `{"tmdbBaseUrl":""}`); code != 200 {
-		t.Fatalf("clear base = %d", code)
+		t.Fatalf("empty base put = %d", code)
+	}
+	if code := get(t, h, "/api/settings", &out); code != 200 || out.TMDBBaseURL != "https://tmdb.example.com" {
+		t.Fatalf("base after empty put = %d %+v (must be preserved)", code, out)
+	}
+	if code, _ := doReq(t, h, http.MethodPut, "/api/settings", `{"tmdbBaseUrl":"`+defaultTMDBBase+`"}`); code != 200 {
+		t.Fatalf("reset base = %d", code)
 	}
 	if code := get(t, h, "/api/settings", &out); code != 200 || out.TMDBBaseURL != defaultTMDBBase {
-		t.Fatalf("base after clear = %d %+v", code, out)
+		t.Fatalf("base after reset = %d %+v", code, out)
 	}
 }

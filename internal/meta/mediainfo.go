@@ -33,35 +33,35 @@ type MediaInfo struct {
 // StreamInfo is one stream of a media source, mirroring the Emby
 // MediaStream shape as written by the NanShare MediaInfo plugin.
 type StreamInfo struct {
-	Type             string  `json:"Type"`
-	Index            int     `json:"Index"`
-	Codec            string  `json:"Codec,omitempty"`
-	CodecTag         string  `json:"CodecTag,omitempty"`
-	Language         string  `json:"Language,omitempty"`
-	DisplayTitle     string  `json:"DisplayTitle,omitempty"`
-	Width            int     `json:"Width,omitempty"`
-	Height           int     `json:"Height,omitempty"`
-	BitRate          int     `json:"BitRate,omitempty"`
-	BitDepth         int     `json:"BitDepth,omitempty"`
-	Profile          string  `json:"Profile,omitempty"`
-	Level            float64 `json:"Level,omitempty"`
-	AverageFrameRate float64 `json:"AverageFrameRate,omitempty"`
-	RealFrameRate    float64 `json:"RealFrameRate,omitempty"`
-	AspectRatio      string  `json:"AspectRatio,omitempty"`
-	IsInterlaced     bool    `json:"IsInterlaced"`
-	IsDefault        bool    `json:"IsDefault"`
-	IsForced         bool    `json:"IsForced"`
-	IsExternal       bool    `json:"IsExternal"`
-	Channels         int     `json:"Channels,omitempty"`
-	ChannelLayout    string  `json:"ChannelLayout,omitempty"`
-	SampleRate       int     `json:"SampleRate,omitempty"`
-	ColorPrimaries   string  `json:"ColorPrimaries,omitempty"`
-	ColorSpace       string  `json:"ColorSpace,omitempty"`
-	ColorTransfer    string  `json:"ColorTransfer,omitempty"`
-	PixelFormat      string  `json:"PixelFormat,omitempty"`
-	RefFrames        int     `json:"RefFrames,omitempty"`
-	VideoRange       string  `json:"VideoRange,omitempty"`
-	ExtendedVideoType string `json:"ExtendedVideoType,omitempty"`
+	Type              string  `json:"Type"`
+	Index             int     `json:"Index"`
+	Codec             string  `json:"Codec,omitempty"`
+	CodecTag          string  `json:"CodecTag,omitempty"`
+	Language          string  `json:"Language,omitempty"`
+	DisplayTitle      string  `json:"DisplayTitle,omitempty"`
+	Width             int     `json:"Width,omitempty"`
+	Height            int     `json:"Height,omitempty"`
+	BitRate           int     `json:"BitRate,omitempty"`
+	BitDepth          int     `json:"BitDepth,omitempty"`
+	Profile           string  `json:"Profile,omitempty"`
+	Level             float64 `json:"Level,omitempty"`
+	AverageFrameRate  float64 `json:"AverageFrameRate,omitempty"`
+	RealFrameRate     float64 `json:"RealFrameRate,omitempty"`
+	AspectRatio       string  `json:"AspectRatio,omitempty"`
+	IsInterlaced      bool    `json:"IsInterlaced"`
+	IsDefault         bool    `json:"IsDefault"`
+	IsForced          bool    `json:"IsForced"`
+	IsExternal        bool    `json:"IsExternal"`
+	Channels          int     `json:"Channels,omitempty"`
+	ChannelLayout     string  `json:"ChannelLayout,omitempty"`
+	SampleRate        int     `json:"SampleRate,omitempty"`
+	ColorPrimaries    string  `json:"ColorPrimaries,omitempty"`
+	ColorSpace        string  `json:"ColorSpace,omitempty"`
+	ColorTransfer     string  `json:"ColorTransfer,omitempty"`
+	PixelFormat       string  `json:"PixelFormat,omitempty"`
+	RefFrames         int     `json:"RefFrames,omitempty"`
+	VideoRange        string  `json:"VideoRange,omitempty"`
+	ExtendedVideoType string  `json:"ExtendedVideoType,omitempty"`
 }
 
 // MediaInfoProvider resolves media info for a .strm file. Phase 1 ships only

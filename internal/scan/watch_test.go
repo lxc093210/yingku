@@ -34,9 +34,9 @@ func TestRelevantEvent(t *testing.T) {
 func TestLibraryForLongestPrefix(t *testing.T) {
 	w := NewWatcher(nil, nil)
 	w.roots = map[string]int64{
-		"/media/na":        1,
-		"/media/na/已整理":    2,
-		"/media/115/电影":    3,
+		"/media/na":     1,
+		"/media/na/已整理": 2,
+		"/media/115/电影": 3,
 	}
 	if id, ok := w.libraryFor("/media/na/已整理/电影/x/x.strm"); !ok || id != 2 {
 		t.Errorf("nested root: got %d,%v want 2,true", id, ok)

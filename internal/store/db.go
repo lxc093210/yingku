@@ -153,6 +153,39 @@ func Open(path string) (*Store, error) {
 			}
 		}
 	}
+	// Migration (batch 28): libraries gained sort_order — the home
+	// page display order, editable from the settings page. Existing
+	// libraries are numbered by id once, when the column appears.
+	has, err = columnExists(db, "libraries", "sort_order")
+	if err != nil {
+		db.Close()
+		return nil, fmt.Errorf("migrate libraries: %w", err)
+	}
+	if !has {
+		if _, err := db.Exec(`ALTER TABLE libraries ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0`); err != nil {
+			db.Close()
+			return nil, fmt.Errorf("migrate libraries sort_order: %w", err)
+		}
+		if _, err := db.Exec(`UPDATE libraries SET sort_order = id`); err != nil {
+			db.Close()
+			return nil, fmt.Errorf("migrate libraries sort_order values: %w", err)
+		}
+	}
+	// Migration (batch 28): items gained search_initials — the pinyin
+	// initials of the title, used by fuzzy search. Filled by scans as
+	// items are written and by a background pass for existing rows.
+	has, err = columnExists(db, "items", "search_initials")
+	if err != nil {
+		db.Close()
+		return nil, fmt.Errorf("migrate items search_initials: %w", err)
+	}
+	if !has {
+		if _, err := db.Exec(`ALTER TABLE items ADD COLUMN search_initials TEXT NOT NULL DEFAULT ''`); err != nil {
+			db.Close()
+			return nil, fmt.Errorf("migrate items search_initials: %w", err)
+		}
+	}
+	s.startInitialsBackfill()
 	return s, nil
 }
 
@@ -258,7 +291,7 @@ CREATE TABLE IF NOT EXISTS media_sources (
   video_codec      TEXT NOT NULL DEFAULT '',
   hdr              TEXT NOT NULL DEFAULT '',
   audio_summary    TEXT NOT NULL DEFAULT '',
-  mediainfo_source TEXT NOT NULL DEFAULT 'none', -- json | filename | none (future: probe)
+  mediainfo_source TEXT NOT NULL DEFAULT 'none', -- json | filename | none | probe
   streams_json     TEXT NOT NULL DEFAULT '',
   size_bytes       INTEGER NOT NULL DEFAULT 0,
   bitrate          INTEGER NOT NULL DEFAULT 0

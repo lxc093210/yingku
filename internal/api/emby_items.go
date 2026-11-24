@@ -47,29 +47,29 @@ type embyUserDataDTO struct {
 }
 
 type embyItemDTO struct {
-	Id                string            `json:"Id"`
-	Name              string            `json:"Name"`
-	Type              string            `json:"Type"`
-	CollectionType    string            `json:"CollectionType,omitempty"`
-	Overview          string            `json:"Overview,omitempty"`
-	ProductionYear    int               `json:"ProductionYear,omitempty"`
-	CommunityRating   float64           `json:"CommunityRating,omitempty"`
-	RunTimeTicks      int64             `json:"RunTimeTicks,omitempty"`
-	ProviderIds       map[string]string `json:"ProviderIds,omitempty"`
-	SeriesName        string            `json:"SeriesName,omitempty"`
-	SeriesId          string            `json:"SeriesId,omitempty"`
-	SeasonId          string            `json:"SeasonId,omitempty"`
-	ParentId          string            `json:"ParentId,omitempty"`
-	IndexNumber       *int              `json:"IndexNumber,omitempty"`
-	ParentIndexNumber *int              `json:"ParentIndexNumber,omitempty"`
-	ChildCount        *int              `json:"ChildCount,omitempty"`
-	MediaType         string            `json:"MediaType,omitempty"`
-	IsFolder          bool              `json:"IsFolder"`
-	DateCreated       string            `json:"DateCreated,omitempty"`
-	ImageTags         map[string]string `json:"ImageTags,omitempty"`
-	BackdropImageTags []string          `json:"BackdropImageTags,omitempty"`
-	PrimaryImageAspectRatio *float64    `json:"PrimaryImageAspectRatio,omitempty"`
-	UserData          *embyUserDataDTO  `json:"UserData,omitempty"`
+	Id                      string            `json:"Id"`
+	Name                    string            `json:"Name"`
+	Type                    string            `json:"Type"`
+	CollectionType          string            `json:"CollectionType,omitempty"`
+	Overview                string            `json:"Overview,omitempty"`
+	ProductionYear          int               `json:"ProductionYear,omitempty"`
+	CommunityRating         float64           `json:"CommunityRating,omitempty"`
+	RunTimeTicks            int64             `json:"RunTimeTicks,omitempty"`
+	ProviderIds             map[string]string `json:"ProviderIds,omitempty"`
+	SeriesName              string            `json:"SeriesName,omitempty"`
+	SeriesId                string            `json:"SeriesId,omitempty"`
+	SeasonId                string            `json:"SeasonId,omitempty"`
+	ParentId                string            `json:"ParentId,omitempty"`
+	IndexNumber             *int              `json:"IndexNumber,omitempty"`
+	ParentIndexNumber       *int              `json:"ParentIndexNumber,omitempty"`
+	ChildCount              *int              `json:"ChildCount,omitempty"`
+	MediaType               string            `json:"MediaType,omitempty"`
+	IsFolder                bool              `json:"IsFolder"`
+	DateCreated             string            `json:"DateCreated,omitempty"`
+	ImageTags               map[string]string `json:"ImageTags,omitempty"`
+	BackdropImageTags       []string          `json:"BackdropImageTags,omitempty"`
+	PrimaryImageAspectRatio *float64          `json:"PrimaryImageAspectRatio,omitempty"`
+	UserData                *embyUserDataDTO  `json:"UserData,omitempty"`
 }
 
 type embyItemsResponse struct {

@@ -22,6 +22,9 @@ type backfillState struct {
 	ArtFound    int    `json:"artFound"`
 	ArtMissing  int    `json:"artMissing"`
 	Errors      int    `json:"errors"`
+	// DoubanFixed counts items whose Chinese title/overview came
+	// from the Douban assist (batch 28).
+	DoubanFixed int    `json:"doubanFixed"`
 	Note        string `json:"note,omitempty"`
 	StartedAt   int64  `json:"startedAt"`
 	FinishedAt  int64  `json:"finishedAt"`
@@ -39,11 +42,10 @@ func (s *Server) backfillUpdate(fn func(*backfillState)) {
 	fn(&s.bf)
 }
 
-func (s *Server) handleBackfillStart(w http.ResponseWriter, r *http.Request) {
-	if !s.requireAdmin(r) {
-		writeErr(w, http.StatusForbidden, "admin required")
-		return
-	}
+// tryStartBackfill atomically marks the backfill as running and
+// reports whether the caller won the slot. Shared by the maintenance
+// endpoint and the metadata scheduled job (batch 28).
+func (s *Server) tryStartBackfill() bool {
 	started := false
 	s.backfillUpdate(func(b *backfillState) {
 		if !b.Running {
@@ -51,7 +53,15 @@ func (s *Server) handleBackfillStart(w http.ResponseWriter, r *http.Request) {
 			started = true
 		}
 	})
-	if !started {
+	return started
+}
+
+func (s *Server) handleBackfillStart(w http.ResponseWriter, r *http.Request) {
+	if !s.requireAdmin(r) {
+		writeErr(w, http.StatusForbidden, "admin required")
+		return
+	}
+	if !s.tryStartBackfill() {
 		writeErr(w, http.StatusConflict, "backfill already running")
 		return
 	}
@@ -72,13 +82,19 @@ func (s *Server) runBackfill() {
 		b.Phase = "done"
 		b.FinishedAt = time.Now().Unix()
 	})
+	// Each backfill run is one Douban round: fresh 50-item budget.
+	s.beginDoubanRound()
 	cfg, err := s.tmdbCfg()
-	if err != nil || !cfg.available() {
+	tmdbOK := err == nil && cfg.available()
+	if !tmdbOK {
+		// TMDB being unavailable does not block the Douban pass
+		// below: those items are exactly the "TMDB has no Chinese
+		// data" set. Only when Douban is also off is there nothing
+		// to do in phase 1.
 		s.backfillUpdate(func(b *backfillState) { b.Note = "tmdb not configured" })
-		log.Printf("tmdb backfill: TMDB not configured, aborting")
-		return
+		log.Printf("tmdb backfill: TMDB not configured, Douban-only phase 1")
 	}
-	// Phase 1: Chinese titles.
+	// Phase 1: Chinese titles (and, via Douban, Chinese overviews).
 	items, err := s.st.TopLevelTmdbItems()
 	if err != nil {
 		s.backfillUpdate(func(b *backfillState) { b.Note = "candidate query failed" })
@@ -89,24 +105,37 @@ func (s *Server) runBackfill() {
 		if it.Type != "movie" && it.Type != "series" {
 			continue
 		}
-		if hasHan(it.Title) {
+		needTitle := !hasHan(it.Title)
+		needOverview := it.Overview == ""
+		if !needTitle && !needOverview {
 			continue
 		}
-		kind := "movie"
-		if it.Type == "series" {
-			kind = "tv"
+		tmdbFixedTitle := false
+		if needTitle && tmdbOK {
+			kind := "movie"
+			if it.Type == "series" {
+				kind = "tv"
+			}
+			title, _, _, _, _, ferr := fetchTMDBDetails(cfg, kind, it.TmdbID)
+			s.backfillUpdate(func(b *backfillState) {
+				b.Processed++
+				if ferr != nil {
+					b.Errors++
+				}
+			})
+			if ferr == nil && title != "" && title != it.Title && hasHan(title) {
+				if uerr := s.st.FillItemTitle(it.ID, title); uerr == nil {
+					tmdbFixedTitle = true
+					s.backfillUpdate(func(b *backfillState) { b.TitlesFixed++ })
+				}
+			}
 		}
-		title, _, _, _, _, ferr := fetchTMDBDetails(cfg, kind, it.TmdbID)
-		s.backfillUpdate(func(b *backfillState) {
-			b.Processed++
-			if ferr != nil {
-				b.Errors++
-			}
-		})
-		if ferr == nil && title != "" && title != it.Title && hasHan(title) {
-			if uerr := s.st.FillItemTitle(it.ID, title); uerr == nil {
-				s.backfillUpdate(func(b *backfillState) { b.TitlesFixed++ })
-			}
+		// Douban assist: only for what TMDB could not provide in
+		// Chinese (no Chinese title, or no overview at all).
+		if (!needTitle || tmdbFixedTitle) && !needOverview {
+			// TMDB covered everything this item needs.
+		} else if s.applyDouban(it) {
+			s.backfillUpdate(func(b *backfillState) { b.DoubanFixed++ })
 		}
 		time.Sleep(150 * time.Millisecond)
 	}

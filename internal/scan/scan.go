@@ -7,11 +7,11 @@
 package scan
 
 import (
-	"encoding/json"
 	"bytes"
 	"crypto/sha1"
 	"encoding/binary"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"io"
 	"io/fs"
@@ -371,12 +371,15 @@ func (s *Scanner) scanLibrary(lib store.Library, owners []rootOwner) error {
 			return err
 		}
 	}
-	deleted, err := s.st.DeleteVanished(lib.ID, seen)
+	deleted, removedIDs, err := s.st.DeleteVanishedDeep(lib.ID, seen)
 	if err != nil {
 		return err
 	}
 	if deleted > 0 {
 		s.bump(func(st *Status) { st.Deleted += deleted })
+	}
+	if len(removedIDs) > 0 {
+		purgeItemCacheFiles(s.st.DBPath(), removedIDs)
 	}
 	if force {
 		if err := s.st.SetSetting(logicVersionKey(lib.ID), strconv.Itoa(CurrentScanLogicVersion)); err != nil {
@@ -631,6 +634,9 @@ func (s *Scanner) writeOne(w *writer, index map[string]store.IndexEntry, seen ma
 	if err := w.ensure(); err != nil {
 		return 0, err
 	}
+	// Fuzzy search (batch 28): every written item carries the pinyin
+	// initials of its final title.
+	p.item.SearchInitials = store.TitleInitials(p.item.Title)
 	id, err := w.tx.UpsertItem(p.item)
 	if err != nil {
 		return 0, err
@@ -794,9 +800,9 @@ func (s *Scanner) flushMovieGroups(w *writer, index map[string]store.IndexEntry,
 			continue
 		}
 		type built struct {
-			p         pendingItem
-			bestW     int
-			bestH     int
+			p     pendingItem
+			bestW int
+			bestH int
 		}
 		var bs []built
 		for _, f := range g.folders {
@@ -1000,6 +1006,15 @@ func (s *Scanner) processSeriesFolder(w *writer, index map[string]store.IndexEnt
 				}
 			}
 		}
+		// Per-season poster (batch 28): the season's own artwork —
+		// season dir poster, else the series root's seasonNN-poster —
+		// registered as the season item's poster image. The file joins
+		// the fingerprint so adding/changing it re-registers the image.
+		var seasonImages map[string]store.ImageFile
+		if img := seasonPosterImage(ctx.files, files, num); img.Path != "" {
+			seasonImages = map[string]store.ImageFile{"poster": img}
+			fpF = append(fpF, img.Path)
+		}
 		st.Fingerprint = fingerprint(fpF, nil)
 		if ex, ok := index[path]; ok && s.unchanged(ex, st.Fingerprint) {
 			s.skip(seen, path)
@@ -1007,7 +1022,7 @@ func (s *Scanner) processSeriesFolder(w *writer, index map[string]store.IndexEnt
 			seasonPaths[num] = path
 			return ex.ID, nil
 		}
-		id, err := s.writeOne(w, index, seen, pendingItem{item: st, subs: []store.Subtitle{}})
+		id, err := s.writeOne(w, index, seen, pendingItem{item: st, images: seasonImages, subs: []store.Subtitle{}})
 		if err != nil {
 			return 0, err
 		}
@@ -1230,6 +1245,26 @@ func sameStemFiles(files []string, strm string) []string {
 	return out
 }
 
+// purgeItemCacheFiles removes the per-item cache files of pruned
+// items (thumbnails, cached hero backdrops, lazy TMDB art — all
+// keyed by item id under <data dir>/cache), mirroring the API
+// layer's purgeItemCaches. Best-effort: cache files are rebuildable.
+func purgeItemCacheFiles(dbPath string, ids []int64) {
+	cache := filepath.Join(filepath.Dir(dbPath), "cache")
+	for _, id := range ids {
+		for _, pat := range []string{
+			filepath.Join(cache, "thumbs", fmt.Sprintf("%d-*.jpg", id)),
+			filepath.Join(cache, "backdrops", fmt.Sprintf("%d.jpg", id)),
+			filepath.Join(cache, "tmdb-art", fmt.Sprintf("%d-*.jpg", id)),
+		} {
+			matches, _ := filepath.Glob(pat)
+			for _, m := range matches {
+				_ = os.Remove(m)
+			}
+		}
+	}
+}
+
 // readStrm returns the first line of a .strm file (the target URL, verbatim).
 func readStrm(path string) string {
 	raw, err := os.ReadFile(path)
@@ -1303,6 +1338,29 @@ func folderImages(files []string) map[string]store.ImageFile {
 		}
 	}
 	return out
+}
+
+// seasonPosterImage resolves a season's own poster file, in order:
+//  1. the season directory's poster/folder image (folderImages rules);
+//  2. the series root's season{NN}-poster.jpg/png (NN zero-padded),
+//     the layout scrapers leave next to tvshow.nfo.
+//
+// The zero ImageFile means "no local season poster": image resolution
+// then falls back to the TMDB season poster, then the series poster.
+func seasonPosterImage(seriesFiles, seasonFiles []string, num int) store.ImageFile {
+	if len(seasonFiles) > 0 {
+		if img, ok := folderImages(seasonFiles)["poster"]; ok && img.Path != "" {
+			return img
+		}
+	}
+	for _, ext := range []string{".jpg", ".png"} {
+		name := fmt.Sprintf("season%02d-poster%s", num, ext)
+		if p := findNamed(seriesFiles, name); p != "" {
+			w, h, _ := imageDims(p)
+			return store.ImageFile{Path: p, Width: w, Height: h}
+		}
+	}
+	return store.ImageFile{}
 }
 
 // imageScore scores an image file by pixel count, falling back to its

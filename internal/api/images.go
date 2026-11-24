@@ -103,7 +103,17 @@ func (s *Server) resolveImageFile(id int64, kind string) string {
 	switch it.Type {
 	case "movie", "series":
 		return s.lazyTMDBArt(id, kind)
-	case "episode", "season":
+	case "season":
+		// Per-season poster chain (batch 28): the season's local
+		// poster was already tried above; next is the TMDB season
+		// poster, then the series chain in resolveEpisodeImage.
+		if kind == "poster" {
+			if p := s.lazySeasonPoster(it); p != "" {
+				return p
+			}
+		}
+		return s.resolveEpisodeImage(it, kind)
+	case "episode":
 		return s.resolveEpisodeImage(it, kind)
 	}
 	return ""
@@ -208,6 +218,61 @@ func (s *Server) lazyEpisodeStill(ep *store.Item) string {
 		return ""
 	}
 	return s.saveTMDBArt(ep.ID, "backdrop", data)
+}
+
+// lazySeasonPoster downloads the season's TMDB poster (w780) into
+// the season item's own tmdb-art poster slot and returns its path.
+// Mirrors lazyEpisodeStill: single-flight per season, failures cache
+// nothing so a later request may retry.
+func (s *Server) lazySeasonPoster(sn *store.Item) string {
+	if sn.SeasonNum == nil {
+		return ""
+	}
+	series := s.seriesItemOf(sn)
+	if series == nil || series.TmdbID <= 0 {
+		return ""
+	}
+	cfg, err := s.tmdbCfg()
+	if err != nil || !cfg.available() {
+		return ""
+	}
+	unlock := s.imgLocks.lock(fmt.Sprintf("art-%d-poster", sn.ID))
+	defer unlock()
+	if cache := s.tmdbArtFile(sn.ID, "poster"); fileExists(cache) {
+		return cache
+	}
+	poster, err := fetchTMDBSeasonPoster(cfg, series.TmdbID, *sn.SeasonNum)
+	if err != nil || poster == "" {
+		return ""
+	}
+	data, err := cfg.downloadSized(poster, "w780")
+	if err != nil || len(data) == 0 {
+		return ""
+	}
+	return s.saveTMDBArt(sn.ID, "poster", data)
+}
+
+// purgeItemCaches removes the per-item cache files of the given
+// items: scaled thumbnails (cache/thumbs/{id}-*), cached TMDB hero
+// backdrops (cache/backdrops/{id}.jpg) and lazy TMDB art
+// (cache/tmdb-art/{id}-*). The tmdb-art files are keyed by ITEM id
+// in this codebase (not by TMDB id), so they belong to the deleted
+// item alone and go with it; a future item can always re-fetch.
+// Library-cover caches are keyed by library and are not touched.
+func (s *Server) purgeItemCaches(ids []int64) {
+	for _, id := range ids {
+		patterns := []string{
+			filepath.Join(s.cacheDir(), "thumbs", fmt.Sprintf("%d-*.jpg", id)),
+			filepath.Join(s.cacheDir(), "backdrops", fmt.Sprintf("%d.jpg", id)),
+			filepath.Join(s.cacheDir(), "tmdb-art", fmt.Sprintf("%d-*.jpg", id)),
+		}
+		for _, pat := range patterns {
+			matches, _ := filepath.Glob(pat)
+			for _, m := range matches {
+				_ = os.Remove(m)
+			}
+		}
+	}
 }
 
 // saveTMDBArt stores downloaded TMDB artwork in the tmdb-art cache

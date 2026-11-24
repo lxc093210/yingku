@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 )
 
@@ -17,6 +18,9 @@ type Library struct {
 	Kind      string
 	Paths     []string
 	ItemCount int
+	// SortOrder is the display order on the home page (batch 28);
+	// lower comes first. Edited via SetLibraryOrder.
+	SortOrder int
 }
 
 // ErrPathOwned is returned when a root path already belongs to another library.
@@ -47,6 +51,10 @@ type Item struct {
 	DateAdded     int64 // unix seconds: newest mtime of the item's own files; 0 = not backfilled yet
 	HasPoster     bool
 	HasBackdrop   bool
+	// SearchInitials is the pinyin-initials string of the title
+	// (batch 28, fuzzy search). Write-only here: scans compute it,
+	// UpsertItem persists it; reads do not scan it back.
+	SearchInitials string
 }
 
 // MediaSource is one .strm-backed source of an item.
@@ -161,6 +169,13 @@ func (s *Store) UpsertLibrary(name, kind, path string) (int64, error) {
 		return 0, err
 	}
 	_, err = s.db.Exec(`INSERT OR IGNORE INTO library_paths(library_id, path) VALUES (?, ?)`, id, path)
+	if err != nil {
+		return 0, err
+	}
+	// A freshly seeded library joins the end of the display order.
+	_, err = s.db.Exec(`UPDATE libraries SET sort_order =
+		(SELECT COALESCE(MAX(sort_order), 0) + 1 FROM libraries)
+		WHERE id = ? AND sort_order = 0`, id)
 	return id, err
 }
 
@@ -209,6 +224,11 @@ func (s *Store) CreateLibrary(name, kind string, paths []string) (int64, error) 
 		if _, err := tx.Exec(`INSERT INTO library_paths(library_id, path) VALUES (?, ?)`, id, p); err != nil {
 			return 0, err
 		}
+	}
+	// New libraries append to the end of the display order.
+	if _, err := tx.Exec(`UPDATE libraries SET sort_order =
+		(SELECT COALESCE(MAX(sort_order), 0) + 1 FROM libraries) WHERE id = ?`, id); err != nil {
+		return 0, err
 	}
 	if err := tx.Commit(); err != nil {
 		return 0, err
@@ -287,8 +307,8 @@ func (s *Store) MergeUserDataInto(survivor int64, doomed []int64) error {
 			return err
 		}
 		type ud struct {
-			user string
-			prog int64
+			user              string
+			prog              int64
 			played, fav, last int64
 		}
 		var list []ud
@@ -341,10 +361,12 @@ func (s *Store) MergeUserDataInto(survivor int64, doomed []int64) error {
 	return tx.Commit()
 }
 
-// DeleteItemByID removes one item; children (sources, images,
-// subtitles, people, user_data) cascade.
+// DeleteItemByID removes one item and its whole subtree with all
+// dependent rows (deep delete, see delete.go). Used by the
+// scanner's version-merge cleanup after user data has been migrated
+// to the surviving item.
 func (s *Store) DeleteItemByID(id int64) error {
-	_, err := s.db.Exec(`DELETE FROM items WHERE id = ?`, id)
+	_, err := s.deleteItemsDeep([]int64{id})
 	return err
 }
 
@@ -355,17 +377,11 @@ func (s *Store) SetItemPath(id int64, path string) error {
 	return err
 }
 
-// DeleteLibrary removes a library and (via FK cascade) all its items and
-// their sources/images/subtitles. Files on disk are never touched.
+// DeleteLibrary removes a library and deep-deletes all its items
+// (see DeleteLibraryDeep). Files on disk are never touched.
 func (s *Store) DeleteLibrary(id int64) error {
-	res, err := s.db.Exec(`DELETE FROM libraries WHERE id = ?`, id)
-	if err != nil {
-		return err
-	}
-	if n, _ := res.RowsAffected(); n == 0 {
-		return sql.ErrNoRows
-	}
-	return nil
+	_, err := s.DeleteLibraryDeep(id)
+	return err
 }
 
 // GetItemByPath returns the item stored under path, or nil.
@@ -385,8 +401,9 @@ func (t *Tx) UpsertItem(it *Item) (int64, error) {
 	err := t.tx.QueryRow(`
 		INSERT INTO items(library_id, type, parent_id, series_id, season_num, episode_num,
 			title, original_title, year, overview, rating, runtime_min, genres,
-			tmdb_id, path, sort_title, fingerprint, created_at, updated_at, date_added)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			tmdb_id, path, sort_title, fingerprint, created_at, updated_at, date_added,
+			search_initials)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(path) DO UPDATE SET
 			library_id = excluded.library_id, type = excluded.type,
 			parent_id = excluded.parent_id, series_id = excluded.series_id,
@@ -396,12 +413,13 @@ func (t *Tx) UpsertItem(it *Item) (int64, error) {
 			rating = excluded.rating, runtime_min = excluded.runtime_min,
 			genres = excluded.genres, tmdb_id = excluded.tmdb_id,
 			sort_title = excluded.sort_title, fingerprint = excluded.fingerprint,
-			updated_at = excluded.updated_at, date_added = excluded.date_added
+			updated_at = excluded.updated_at, date_added = excluded.date_added,
+			search_initials = excluded.search_initials
 		RETURNING id`,
 		it.LibraryID, it.Type, it.ParentID, it.SeriesID, it.SeasonNum, it.EpisodeNum,
 		it.Title, it.OriginalTitle, it.Year, it.Overview, it.Rating, it.RuntimeMin,
 		string(genres), it.TmdbID, it.Path, it.SortTitle, it.Fingerprint,
-		it.CreatedAt, it.UpdatedAt, it.DateAdded).Scan(&id)
+		it.CreatedAt, it.UpdatedAt, it.DateAdded, it.SearchInitials).Scan(&id)
 	return id, err
 }
 
@@ -461,46 +479,13 @@ func (t *Tx) ReplaceSubtitles(itemID int64, subs []Subtitle) error {
 	return nil
 }
 
-// DeleteVanished removes items of the library whose path is not in seen.
-// Paths are streamed with a cursor and deleted in batches of 500.
+// DeleteVanished removes items of the library whose path is not in
+// seen, deep-deleting their subtrees and dependent rows (see
+// delete.go). The count covers every removed item, descendants
+// included.
 func (s *Store) DeleteVanished(libraryID int64, seen map[string]struct{}) (int, error) {
-	rows, err := s.db.Query(`SELECT id, path FROM items WHERE library_id = ?`, libraryID)
-	if err != nil {
-		return 0, err
-	}
-	var doomed []int64
-	for rows.Next() {
-		var id int64
-		var p string
-		if err := rows.Scan(&id, &p); err != nil {
-			rows.Close()
-			return 0, err
-		}
-		if _, ok := seen[p]; !ok {
-			doomed = append(doomed, id)
-		}
-	}
-	rows.Close()
-	if err := rows.Err(); err != nil {
-		return 0, err
-	}
-	deleted := 0
-	for len(doomed) > 0 {
-		n := 500
-		if len(doomed) < n {
-			n = len(doomed)
-		}
-		batch := doomed[:n]
-		doomed = doomed[n:]
-		ph := strings.TrimSuffix(strings.Repeat("?,", len(batch)), ",")
-		res, err := s.db.Exec(`DELETE FROM items WHERE id IN (`+ph+`)`, int64s(batch)...)
-		if err != nil {
-			return deleted, err
-		}
-		affected, _ := res.RowsAffected()
-		deleted += int(affected)
-	}
-	return deleted, nil
+	n, _, err := s.DeleteVanishedDeep(libraryID, seen)
+	return n, err
 }
 
 func int64s(v []int64) []any {
@@ -518,15 +503,16 @@ func int64s(v []int64) []any {
 func (s *Store) ListLibraries() ([]Library, error) {
 	rows, err := s.db.Query(`
 		SELECT l.id, l.name, l.kind,
-			(SELECT COUNT(*) FROM items i WHERE i.library_id = l.id AND i.parent_id IS NULL)
-		FROM libraries l ORDER BY l.id`)
+			(SELECT COUNT(*) FROM items i WHERE i.library_id = l.id AND i.parent_id IS NULL),
+			l.sort_order
+		FROM libraries l ORDER BY l.sort_order, l.id`)
 	if err != nil {
 		return nil, err
 	}
 	var out []Library
 	for rows.Next() {
 		var l Library
-		if err := rows.Scan(&l.ID, &l.Name, &l.Kind, &l.ItemCount); err != nil {
+		if err := rows.Scan(&l.ID, &l.Name, &l.Kind, &l.ItemCount, &l.SortOrder); err != nil {
 			rows.Close()
 			return nil, err
 		}
@@ -808,9 +794,11 @@ func (s *Store) FillItemMeta(id int64, overview string, rating float64, genres [
 // FillItemTitle replaces an item's title and sort title (the
 // scanner keeps sort_title equal to the title). Used by the TMDB
 // Chinese-title fill, which fires only when the current title has
-// no Chinese characters and TMDB's zh-CN title does.
+// no Chinese characters and TMDB's zh-CN title does. The pinyin
+// search initials follow the new title (batch 28).
 func (s *Store) FillItemTitle(id int64, title string) error {
-	_, err := s.db.Exec(`UPDATE items SET title = ?, sort_title = ? WHERE id = ?`, title, title, id)
+	_, err := s.db.Exec(`UPDATE items SET title = ?, sort_title = ?, search_initials = ? WHERE id = ?`,
+		title, title, TitleInitials(title), id)
 	return err
 }
 
@@ -871,16 +859,16 @@ func (s *Store) GetSubtitle(id int64) (*Subtitle, error) {
 	return &sub, nil
 }
 
-// DeleteItem removes one item row. Foreign-key cascades clear its
-// children (seasons/episodes) and every dependent row (sources, images,
-// subtitles, people, user_data); the FTS delete trigger keeps the search
-// index in sync.
+// DeleteItem removes one item, its whole subtree and every
+// dependent row (deep delete, see delete.go); the FTS delete
+// trigger keeps the search index in sync. sql.ErrNoRows when the
+// item does not exist.
 func (s *Store) DeleteItem(id int64) error {
-	res, err := s.db.Exec(`DELETE FROM items WHERE id = ?`, id)
+	ids, err := s.deleteItemsDeep([]int64{id})
 	if err != nil {
 		return err
 	}
-	if n, _ := res.RowsAffected(); n == 0 {
+	if len(ids) == 0 {
 		return sql.ErrNoRows
 	}
 	return nil
@@ -950,8 +938,20 @@ func (s *Store) Recent(limit int) ([]*Item, error) {
 	return out, rows.Err()
 }
 
-// Search runs an FTS5 prefix search over title/original_title, falling back
-// to a LIKE scan when FTS yields nothing.
+// Search finds items by title across four routes, merged in priority
+// order and deduplicated (batch 28 fuzzy search):
+//
+//  1. FTS5 prefix search over title/original_title (the original route,
+//     always first);
+//  2. multi-term substring: every whitespace-separated term of the
+//     query must appear in title or original_title (LIKE, AND);
+//  3. subsequence fuzzy: the space-stripped query as a subsequence of
+//     the title (skipped characters allowed, e.g. 钢侠 hits 钢铁侠),
+//     ranked by match span;
+//  4. pinyin initials: a pure-lowercase-letters query of length >= 2
+//     also matches the search_initials column (gtx hits 钢铁侠).
+//
+// Routes 2-4 only run while the result set is still below the limit.
 func (s *Store) Search(q string, limit int) ([]*Item, error) {
 	q = strings.TrimSpace(q)
 	if q == "" {
@@ -960,6 +960,27 @@ func (s *Store) Search(q string, limit int) ([]*Item, error) {
 	if limit <= 0 || limit > 200 {
 		limit = 60
 	}
+	seen := map[int64]bool{}
+	var out []*Item
+	collect := func(rows *sql.Rows, err error) error {
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			it, err := scanItem(rows)
+			if err != nil {
+				return err
+			}
+			if !seen[it.ID] {
+				seen[it.ID] = true
+				out = append(out, it)
+			}
+		}
+		return rows.Err()
+	}
+
+	// Route 1: FTS prefix search.
 	var terms []string
 	for _, f := range strings.Fields(q) {
 		f = strings.ReplaceAll(f, `"`, "")
@@ -972,37 +993,141 @@ func (s *Store) Search(q string, limit int) ([]*Item, error) {
 		rows, err := s.db.Query(`SELECT `+itemCols+` FROM items
 			JOIN items_fts ON items_fts.rowid = items.id
 			WHERE items_fts MATCH ? ORDER BY items.id LIMIT ?`, match, limit)
-		if err == nil {
-			defer rows.Close()
-			var out []*Item
-			for rows.Next() {
-				it, err := scanItem(rows)
-				if err != nil {
-					return nil, err
-				}
-				out = append(out, it)
-			}
-			if err := rows.Err(); err == nil && len(out) > 0 {
-				return out, nil
-			}
+		_ = collect(rows, err) // an FTS failure just skips this route
+	}
+
+	// Route 2: every term as a substring of title or original_title.
+	if len(out) < limit && len(terms) > 0 {
+		fields := strings.Fields(q)
+		conds := make([]string, 0, len(fields))
+		args := make([]any, 0, len(fields)*2+1)
+		for _, f := range fields {
+			conds = append(conds, `(title LIKE ? ESCAPE '\' OR original_title LIKE ? ESCAPE '\')`)
+			like := "%" + likeEscape(f) + "%"
+			args = append(args, like, like)
+		}
+		args = append(args, limit)
+		rows, err := s.db.Query(`SELECT `+itemCols+` FROM items WHERE `+
+			strings.Join(conds, " AND ")+` ORDER BY id LIMIT ?`, args...)
+		if err := collect(rows, err); err != nil {
+			return nil, err
 		}
 	}
-	like := "%" + q + "%"
+
+	// Route 3: subsequence fuzzy over the title.
+	if len(out) < limit {
+		extra, err := s.searchSubsequence(q, limit-len(out), seen)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, extra...)
+	}
+
+	// Route 4: pinyin initials.
+	if len(out) < limit && isInitialsQuery(q) {
+		rows, err := s.db.Query(`SELECT `+itemCols+` FROM items
+			WHERE search_initials LIKE ? ORDER BY id LIMIT ?`,
+			"%"+q+"%", limit)
+		if err := collect(rows, err); err != nil {
+			return nil, err
+		}
+	}
+	if len(out) > limit {
+		out = out[:limit]
+	}
+	return out, nil
+}
+
+// likeEscape escapes LIKE wildcards in a user term (ESCAPE '\').
+func likeEscape(s string) string {
+	return strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`).Replace(s)
+}
+
+// isInitialsQuery reports whether q can be a pinyin-initials query:
+// at least two characters, all lowercase ASCII letters.
+func isInitialsQuery(q string) bool {
+	if len(q) < 2 {
+		return false
+	}
+	for i := 0; i < len(q); i++ {
+		if q[i] < 'a' || q[i] > 'z' {
+			return false
+		}
+	}
+	return true
+}
+
+// searchSubsequence implements route 3 of Search: the query (spaces
+// removed) must appear in the title as a subsequence. Candidates are
+// narrowed with a first-character LIKE, then ranked by the span the
+// match covers (tighter first).
+func (s *Store) searchSubsequence(q string, limit int, seen map[int64]bool) ([]*Item, error) {
+	needle := []rune(strings.ReplaceAll(q, " ", ""))
+	if len(needle) < 2 || limit <= 0 {
+		return nil, nil
+	}
+	first := "%" + likeEscape(string(needle[0])) + "%"
 	rows, err := s.db.Query(`SELECT `+itemCols+` FROM items
-		WHERE title LIKE ? OR original_title LIKE ? ORDER BY id LIMIT ?`, like, like, limit)
+		WHERE title LIKE ? ESCAPE '\' ORDER BY id LIMIT 400`, first)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var out []*Item
+	type cand struct {
+		it   *Item
+		span int
+	}
+	var cands []cand
 	for rows.Next() {
 		it, err := scanItem(rows)
 		if err != nil {
 			return nil, err
 		}
-		out = append(out, it)
+		if seen[it.ID] {
+			continue
+		}
+		if span, ok := subsequenceSpan([]rune(it.Title), needle); ok {
+			cands = append(cands, cand{it, span})
+		}
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	sort.SliceStable(cands, func(i, j int) bool {
+		if cands[i].span != cands[j].span {
+			return cands[i].span < cands[j].span
+		}
+		return cands[i].it.ID < cands[j].it.ID
+	})
+	out := make([]*Item, 0, len(cands))
+	for _, c := range cands {
+		seen[c.it.ID] = true
+		out = append(out, c.it)
+		if len(out) >= limit {
+			break
+		}
+	}
+	return out, nil
+}
+
+// subsequenceSpan greedily matches needle as a subsequence of hay and
+// returns the span (last matched index - first matched index + 1).
+func subsequenceSpan(hay, needle []rune) (int, bool) {
+	first, last := -1, -1
+	j := 0
+	for i, r := range hay {
+		if j < len(needle) && r == needle[j] {
+			if first < 0 {
+				first = i
+			}
+			last = i
+			j++
+		}
+	}
+	if j < len(needle) {
+		return 0, false
+	}
+	return last - first + 1, true
 }
 
 // Stats aggregates library/type/mediainfo-source counts.

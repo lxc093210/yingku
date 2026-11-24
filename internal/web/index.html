@@ -51,26 +51,6 @@
     display:inline-flex;align-items:center;justify-content:center}
   .iconbtn:hover{border-color:#4a4e57}
 
-  /* ---------- drawer ---------- */
-  #drawerShade{position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:90;
-    opacity:0;pointer-events:none;transition:opacity .24s ease-out}
-  #drawerShade.open{opacity:1;pointer-events:auto}
-  #drawer{position:fixed;top:0;left:0;bottom:0;width:272px;z-index:95;background:#131518;
-    border-right:1px solid var(--line);transform:translateX(-100%);transition:transform .26s ease-out;
-    overflow-y:auto;padding:18px 0}
-  #drawer.open{transform:translateX(0)}
-  #drawer .dlogo{display:flex;align-items:center;gap:8px;font-size:19px;font-weight:800;
-    letter-spacing:.14em;padding:2px 20px 16px;color:#fff}
-  #drawer .dlogo svg{width:19px;height:19px}
-  #drawer .dlogo svg path{fill:var(--green)}
-  .dnav a{display:flex;align-items:center;gap:10px;padding:11px 20px;font-size:14.5px;
-    color:#d6d8db;cursor:pointer}
-  .dnav a:hover{background:rgba(255,255,255,.06);color:#fff}
-  .dnav a.on{background:rgba(255,255,255,.09);color:#fff;font-weight:600;
-    box-shadow:inset 3px 0 0 var(--green)}
-  .dnav .dsec{padding:16px 20px 6px;font-size:12px;letter-spacing:.18em;color:var(--faint)}
-  .dnav .ddiv{height:1px;background:var(--line);margin:10px 0}
-
   main{padding-bottom:70px}
   .pad{padding-top:calc(var(--bar-h) + 16px)}
 
@@ -395,6 +375,81 @@
   .btn.big{width:100%;padding:11px;font-size:15px;margin-top:10px}
   .uadmin-badge{color:var(--green);border:1px solid var(--green);border-radius:999px;
     font-size:11px;padding:1px 8px}
+
+  /* ---------- batch 28: header extras, settings modules, layout discipline ---------- */
+  :root{--sp1:8px;--sp2:16px;--sp3:24px;--ctl-h:40px}
+  .bar-right{position:relative}
+  .avatarbtn{width:36px;height:36px;border-radius:50%;border:1px solid var(--line);
+    background:var(--green);color:#fff;font-weight:700;font-size:15px;cursor:pointer;flex:none;
+    display:inline-flex;align-items:center;justify-content:center;text-transform:uppercase}
+  #userMenu{position:absolute;top:calc(var(--bar-h) - 6px);right:0;width:224px;z-index:130;
+    background:var(--panel2);border:1px solid var(--line);border-radius:12px;padding:8px;
+    display:none;box-shadow:0 16px 40px rgba(0,0,0,.5)}
+  #userMenu.open{display:block}
+  #userMenu .um-head{padding:8px 10px;font-weight:600;border-bottom:1px solid var(--line);margin-bottom:6px;
+    white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  #userMenu button{display:block;width:100%;text-align:left;background:none;border:none;color:var(--text);
+    font-size:14px;padding:9px 10px;border-radius:8px;cursor:pointer}
+  #userMenu button:hover{background:rgba(255,255,255,.07)}
+  #searchDrop{position:absolute;top:calc(var(--bar-h) - 6px);right:0;width:min(360px,88vw);z-index:130;
+    max-height:62vh;overflow:auto;background:var(--panel2);border:1px solid var(--line);
+    border-radius:12px;display:none;box-shadow:0 16px 40px rgba(0,0,0,.5);padding:6px}
+  #searchDrop.open{display:block}
+  .srow{display:flex;gap:10px;align-items:center;padding:7px 8px;border-radius:9px;cursor:pointer}
+  .srow:hover{background:rgba(255,255,255,.07)}
+  .srow img{width:34px;height:51px;object-fit:cover;border-radius:5px;flex:none;background:var(--panel)}
+  .srow .st{font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .srow .sm{font-size:12px;color:var(--muted)}
+  .setpage{max-width:1180px;margin:0 auto;padding:0 4%}
+  .setchips{display:flex;gap:8px;flex-wrap:wrap;margin:16px 0 24px;padding:8px 0;
+    position:sticky;top:var(--bar-h);z-index:20;background:linear-gradient(180deg,var(--bg) 80%,transparent)}
+  .setchip{border:1px solid var(--line);background:var(--panel);color:var(--text);
+    border-radius:999px;padding:7px 15px;font-size:13.5px;cursor:pointer}
+  .setchip:hover{border-color:#4a4e57}
+  .modcard{background:var(--panel);border:1px solid var(--line);border-radius:16px;
+    padding:24px;margin-bottom:24px;scroll-margin-top:calc(var(--bar-h) + 72px)}
+  .modhead{display:flex;align-items:center;justify-content:space-between;cursor:pointer;user-select:none}
+  .modhead h3{margin:0;font-size:17px}
+  .modarrow{color:var(--muted);font-size:14px;transition:transform .18s}
+  .modcard.closed .modarrow{transform:rotate(-90deg)}
+  .modbody{margin-top:16px}
+  .modcard.closed .modbody{display:none}
+  .modbody .hint{line-height:1.65}
+  .flabel{display:block;font-size:13px;color:var(--muted);margin:0 0 6px}
+  .modbody input[type="text"],.modbody input[type="password"],.modbody select{height:var(--ctl-h)}
+  .modbody .pathrow{align-items:center}
+  .jobsgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:16px}
+  .jobcard{display:flex;flex-direction:column;gap:8px;background:var(--panel2);
+    border:1px solid var(--line);border-radius:12px;padding:16px}
+  .jobcard h4{margin:0;font-size:15px}
+  .jobcard .jdesc{font-size:12.5px;color:var(--muted);line-height:1.55}
+  .jobcard .jrow{display:flex;align-items:center;gap:8px;font-size:13px;min-height:28px}
+  .jobcard .jlast{font-size:12px;color:var(--muted);line-height:1.55;word-break:break-all}
+  .jobcard .jfoot{margin-top:auto;padding-top:8px}
+  .switch{position:relative;width:40px;height:22px;flex:none;display:inline-block}
+  .switch input{opacity:0;width:100%;height:100%;position:absolute;left:0;top:0;margin:0;cursor:pointer;z-index:1}
+  .switch i{position:absolute;inset:0;background:#3a3e45;border-radius:999px;transition:background .15s;pointer-events:none}
+  .switch i:after{content:"";position:absolute;left:3px;top:3px;width:16px;height:16px;border-radius:50%;background:#fff;transition:left .15s}
+  .switch input:checked + i{background:var(--green)}
+  .switch input:checked + i:after{left:21px}
+  .coverstyles{display:grid;grid-template-columns:repeat(auto-fill,minmax(128px,1fr));gap:8px}
+  .coverstyle{border:1px solid var(--line);border-radius:12px;padding:14px 10px;text-align:center;
+    cursor:pointer;background:var(--panel2)}
+  .coverstyle .csn{font-size:14px;font-weight:600}
+  .coverstyle .csd{font-size:11.5px;color:var(--muted);margin-top:4px;line-height:1.5}
+  .coverstyle.on{border-color:var(--green);box-shadow:0 0 0 1px var(--green)}
+  .coverwall{display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:16px}
+  .coverlib{cursor:pointer}
+  .coverlib img{width:100%;aspect-ratio:16/9;object-fit:cover;border-radius:10px;background:var(--panel2);display:block}
+  .coverlib .cnm{display:flex;justify-content:space-between;align-items:baseline;font-size:13px;margin-top:6px;gap:8px}
+  .coverlib .cbadge{font-size:11px;color:var(--muted);flex:none}
+  .rowhead .colarrow{cursor:pointer;color:var(--muted);font-size:15px;margin-left:10px;user-select:none}
+  .librow .ops .btn.small{height:30px}
+  @media (max-width:640px){
+    .jobsgrid{grid-template-columns:1fr}
+    .modcard{padding:16px}
+    .coverwall{grid-template-columns:repeat(auto-fill,minmax(150px,1fr))}
+  }
 </style>
 </head>
 <body>
@@ -426,7 +481,6 @@
 
 <header id="topbar">
   <div class="bar-left">
-    <button class="iconbtn" id="burger" title="菜单">☰</button>
     <div class="logo" id="logo"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 2.5 L21 12 L5 21.5 Z"/></svg>影库</div>
   </div>
   <div class="tabs">
@@ -436,19 +490,17 @@
   <div class="bar-right">
     <label class="searchbox" id="searchBox"><span>⌕</span><input id="search" type="text" placeholder="搜索片名…" autocomplete="off"></label>
     <button class="iconbtn" id="searchBtn" title="搜索">⌕</button>
+    <button class="avatarbtn" id="avatarBtn" title="账号">?</button>
+    <button class="iconbtn" id="gearBtn" title="设置">⚙</button>
+    <div id="searchDrop"></div>
+    <div id="userMenu"></div>
   </div>
 </header>
-
-<div id="drawerShade"></div>
-<aside id="drawer">
-  <div class="dlogo"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 2.5 L21 12 L5 21.5 Z"/></svg>影库</div>
-  <nav class="dnav" id="drawerNav"></nav>
-</aside>
 
 <main>
   <section id="view-home" class="pad">
     <div id="homeSecs"></div>
-    <div class="empty" id="homeEmpty" style="display:none">媒体库还是空的。从左上角 ☰ 菜单打开「设置」，新建媒体库并扫描，或先在设置里触发全库扫描。</div>
+    <div class="empty" id="homeEmpty" style="display:none">媒体库还是空的。点右上角 ⚙ 设置，新建媒体库并扫描，或先在设置里触发全库扫描。</div>
   </section>
 
   <section id="view-fav" class="pad" style="display:none">
@@ -477,102 +529,170 @@
   <section id="view-detail" style="display:none">
     <div id="detailPage"></div>
   </section>
-</main>
 
-<!-- settings overlay -->
-<div class="overlay" id="settingsOverlay">
-  <div class="sheet wide" style="position:relative">
-    <button class="iconbtn x" data-close="settingsOverlay">✕</button>
-    <div class="setbody">
-      <h2>设置</h2>
+  <section id="view-settings" class="pad" style="display:none">
+    <div class="setpage">
+      <h2 style="margin:8px 0 4px">设置</h2>
       <div class="hint" id="statsLine">—</div>
-
-      <h3>媒体库管理</h3>
-      <div id="libList"></div>
-      <div style="margin-top:14px"><button class="btn red" id="newLibBtn">＋ 新建媒体库</button></div>
-
-      <form class="libform" id="libForm">
-        <label>库名称</label>
-        <input type="text" id="fName" placeholder="如：华语电影">
-        <label>类型</label>
-        <select id="fKind">
-          <option value="movie">电影</option>
-          <option value="series">电视剧</option>
-          <option value="mixed">混合</option>
-        </select>
-        <label id="fPathsLabel">根文件夹（可多个）</label>
-        <div id="fPaths"></div>
-        <button type="button" class="btn small" id="addPathBtn">＋ 添加路径</button>
-        <div class="modalfoot">
-          <button type="button" class="btn" id="formCancel">取消</button>
-          <button type="submit" class="btn red">保存</button>
+      <div class="setchips" id="setChips">
+        <button class="setchip" data-mod="jobs">计划任务</button>
+        <button class="setchip" data-mod="libs">媒体库</button>
+        <button class="setchip" data-mod="scan">扫描与监控</button>
+        <button class="setchip" data-mod="cover">封面生成</button>
+        <button class="setchip" data-mod="tmdb">TMDB 与元数据</button>
+        <button class="setchip" data-mod="access">接入与安全</button>
+        <button class="setchip" data-mod="users">用户管理</button>
+        <button class="setchip" data-mod="account">我的账号</button>
+      </div>
+      <div id="settingsModules">
+      <div class="modcard" data-mod="jobs" id="mod-jobs">
+        <div class="modhead"><h3>计划任务</h3><span class="modarrow">▾</span></div>
+        <div class="modbody">
+          <div class="jobsgrid" id="jobsList"></div>
+          <div class="hint" style="margin-top:12px">到点自动执行，同一任务同时只跑一个；扫描任务与文件夹实时监控共用同一把扫描锁，不会并发重入。</div>
         </div>
-      </form>
-
-      <h3>扫描</h3>
-      <div class="scanline">
-        <button class="btn" id="scanAllBtn">全库扫描</button>
-        <span class="scanstat" id="scanStat">—</span>
       </div>
 
-      <h3>TMDB</h3>
-      <div class="hint" style="margin-bottom:10px">填写 TMDB API Key 后，本地 NFO 没有演员头像的条目会从 TMDB 补齐演职人员。Key 只保存在本机数据库，页面不会回显；保存空值将清除已存的 Key。</div>
-      <div class="pathrow">
-        <input type="password" id="tmdbKey" placeholder="未设置" autocomplete="off"
-          style="flex:1;background:var(--panel);border:1px solid var(--line);color:var(--text);border-radius:8px;padding:9px 12px;font-size:14px;outline:none">
-        <button type="button" class="btn small" id="tmdbSave">保存</button>
+      <div class="modcard" data-mod="libs" id="mod-libs">
+        <div class="modhead"><h3>媒体库</h3><span class="modarrow">▾</span></div>
+        <div class="modbody">
+          <div id="libList"></div>
+          <div style="margin-top:14px"><button class="btn red" id="newLibBtn">＋ 新建媒体库</button></div>
+          <form class="libform" id="libForm">
+            <label>库名称</label>
+            <input type="text" id="fName" placeholder="如：华语电影">
+            <label>类型</label>
+            <select id="fKind">
+              <option value="movie">电影</option>
+              <option value="series">电视剧</option>
+              <option value="mixed">混合</option>
+            </select>
+            <label id="fPathsLabel">根文件夹（可多个）</label>
+            <div id="fPaths"></div>
+            <button type="button" class="btn small" id="addPathBtn">＋ 添加路径</button>
+            <div class="modalfoot">
+              <button type="button" class="btn" id="formCancel">取消</button>
+              <button type="submit" class="btn red">保存</button>
+            </div>
+          </form>
+        </div>
       </div>
-      <label style="display:block;font-size:13px;color:var(--muted);margin:12px 0 6px">API 基址（可选）</label>
-      <div class="pathrow">
-        <input type="text" id="tmdbBase" placeholder="https://api.themoviedb.org/3" autocomplete="off"
-          style="flex:1;background:var(--panel);border:1px solid var(--line);color:var(--text);border-radius:8px;padding:9px 12px;font-size:14px;outline:none">
-      </div>
-      <div class="hint">使用自建 TMDB 代理时填代理地址：代理会在服务端注入 Key，此时可不填 Key；演员补齐与高清背景图都会走这个基址。</div>
 
-      <h3>API 密钥</h3>
-      <div class="hint" style="margin-bottom:10px">用于与 Nan（Emby 助手）、MoviePilot 等联动：在对方的 Emby 服务器配置里填影库地址（如 http://192.168.1.5:8097）和下面的密钥。密钥只保存在本机数据库。</div>
-      <div class="pathrow">
-        <input type="text" id="apiKeyInput" readonly placeholder="—" autocomplete="off"
-          style="flex:1;background:var(--panel);border:1px solid var(--line);color:var(--text);border-radius:8px;padding:9px 12px;font-size:13px;outline:none">
-        <button type="button" class="btn small" id="apiKeyCopy">复制</button>
-        <button type="button" class="btn small" id="apiKeyRegen">重新生成</button>
+      <div class="modcard" data-mod="scan" id="mod-scan">
+        <div class="modhead"><h3>扫描与监控</h3><span class="modarrow">▾</span></div>
+        <div class="modbody">
+          <div class="scanline">
+            <button class="btn" id="scanAllBtn">全库扫描</button>
+            <span class="scanstat" id="scanStat">—</span>
+          </div>
+          <div class="hint" style="margin-top:10px">文件夹实时监控运行中：库目录有增删改时自动对该库增量扫描；定时的全库扫描在「计划任务」里配置。</div>
+        </div>
       </div>
-      <label style="display:flex;align-items:center;gap:8px;font-size:14px;margin:14px 0 6px;cursor:pointer">
-        <input type="checkbox" id="apiAuthRequired" style="width:16px;height:16px;accent-color:var(--red,#e50914)">
-        要求密钥鉴权
-      </label>
-      <div class="hint">开启后，所有 API 请求必须带密钥（api_key 参数或 X-Emby-Token 头），网页端会自动附带。当前浏览器会记住密钥；其他浏览器首次打开时，在地址后加 ?api_key=密钥 访问一次即可记住。开启前请先复制保存好密钥，丢失密钥将无法通过网页管理（需在数据库中清除 api_auth_required 恢复）。</div>
 
-      <div id="userAdminSection" style="display:none">
-        <h3>用户管理</h3>
-        <div id="userList"></div>
-        <form id="newUserForm" style="margin-top:12px">
+      <div class="modcard" data-mod="cover" id="mod-cover">
+        <div class="modhead"><h3>封面生成</h3><span class="modarrow">▾</span></div>
+        <div class="modbody">
+          <div class="hint" style="margin-bottom:12px">从各库带背景图的条目里按画质打分挑图，生成 1920×1080 库封面（五种风格）。生成结果直接作为该库封面，网页与客户端全端生效；也可点下方某个库单独重新生成。</div>
+          <label class="flabel">风格</label>
+          <div class="coverstyles" id="coverStyles"></div>
+          <div class="pathrow" style="margin-top:16px;align-items:center">
+            <label style="font-size:13.5px;color:var(--muted)">候选排序</label>
+            <select id="coverSort">
+              <option value="datecreated">按入库时间</option>
+              <option value="rating">按评分</option>
+            </select>
+            <button type="button" class="btn red" id="coverGenBtn">生成全部封面</button>
+            <span class="scanstat" id="coverLast">—</span>
+          </div>
+          <label class="flabel" style="margin-top:16px">各库封面</label>
+          <div class="coverwall" id="coverLibs"></div>
+        </div>
+      </div>
+
+      <div class="modcard" data-mod="tmdb" id="mod-tmdb">
+        <div class="modhead"><h3>TMDB 与元数据</h3><span class="modarrow">▾</span></div>
+        <div class="modbody">
+          <div class="hint" style="margin-bottom:10px">填写 TMDB API Key 后，本地 NFO 缺失的元数据（演职人员、季海报等）会从 TMDB 补齐。Key 只保存在本机数据库，页面不会回显；保存空值将清除已存的 Key。</div>
+          <label class="flabel">API Key</label>
           <div class="pathrow">
-            <input type="text" id="nuName" placeholder="用户名" autocomplete="off"
+            <input type="password" id="tmdbKey" placeholder="未设置" autocomplete="off"
               style="flex:1;background:var(--panel);border:1px solid var(--line);color:var(--text);border-radius:8px;padding:9px 12px;font-size:14px;outline:none">
-            <input type="password" id="nuPw" placeholder="密码" autocomplete="new-password"
+            <button type="button" class="btn small" id="tmdbSaveKey">保存 Key</button>
+          </div>
+          <label class="flabel">API 基址（可选）</label>
+          <div class="pathrow">
+            <input type="text" id="tmdbBase" placeholder="https://api.themoviedb.org/3" autocomplete="off"
               style="flex:1;background:var(--panel);border:1px solid var(--line);color:var(--text);border-radius:8px;padding:9px 12px;font-size:14px;outline:none">
+            <button type="button" class="btn small" id="tmdbProxyBtn">填入自建代理</button>
+            <button type="button" class="btn small" id="tmdbSaveBase" disabled>保存基址</button>
           </div>
-          <div style="display:flex;align-items:center;gap:12px;margin-top:10px">
-            <label style="display:flex;align-items:center;gap:6px;font-size:13px;color:var(--muted);cursor:pointer">
-              <input type="checkbox" id="nuAdmin" style="width:15px;height:15px"> 管理员
-            </label>
-            <button type="submit" class="btn small">＋ 新建用户</button>
-          </div>
-        </form>
+          <div class="hint">使用自建 TMDB 代理时填代理地址：代理会在服务端注入 Key，此时可不填 Key；演员补齐与高清背景图都会走这个基址。基址单独保存，加载完成前不可保存，防止未加载完就保存把基址冲掉。</div>
+          <label class="flabel" style="margin-top:16px">豆瓣辅助</label>
+          <label style="display:flex;align-items:center;gap:8px;font-size:14px;cursor:pointer">
+            <input type="checkbox" id="doubanAssist" style="width:16px;height:16px;accent-color:var(--green)">
+            启用豆瓣辅助刮削
+          </label>
+          <div class="hint">仅当 TMDB 没有中文标题或中文简介时，才用豆瓣补齐这两项；TMDB 有中文时绝不查豆瓣。豆瓣请求严格限流（全局串行、间隔 ≥2 秒、每轮 ≤50 条），被限流（403/429）立即停本轮并在任务结果里注明。</div>
+        </div>
       </div>
 
-      <h3>我的账号</h3>
-      <div class="hint" id="meLine" style="margin-bottom:10px">—</div>
-      <div class="pathrow">
-        <input type="password" id="myPw" placeholder="新密码" autocomplete="new-password"
-          style="flex:1;background:var(--panel);border:1px solid var(--line);color:var(--text);border-radius:8px;padding:9px 12px;font-size:14px;outline:none">
-        <button type="button" class="btn small" id="myPwSave">修改我的密码</button>
-        <button type="button" class="btn small" id="logoutBtn">退出登录</button>
+      <div class="modcard" data-mod="access" id="mod-access">
+        <div class="modhead"><h3>接入与安全</h3><span class="modarrow">▾</span></div>
+        <div class="modbody">
+          <div class="hint" style="margin-bottom:10px">API 密钥用于与 Nan（Emby 助手）、MoviePilot 等联动：在对方的 Emby 服务器配置里填影库地址（如 http://192.168.1.5:8097）和下面的密钥。密钥只保存在本机数据库。</div>
+          <div class="pathrow">
+            <input type="text" id="apiKeyInput" readonly placeholder="—" autocomplete="off"
+              style="flex:1;background:var(--panel);border:1px solid var(--line);color:var(--text);border-radius:8px;padding:9px 12px;font-size:13px;outline:none">
+            <button type="button" class="btn small" id="apiKeyCopy">复制</button>
+            <button type="button" class="btn small" id="apiKeyRegen">重新生成</button>
+          </div>
+          <label style="display:flex;align-items:center;gap:8px;font-size:14px;margin:14px 0 6px;cursor:pointer">
+            <input type="checkbox" id="apiAuthRequired" style="width:16px;height:16px;accent-color:var(--red,#e50914)">
+            要求密钥鉴权
+          </label>
+          <div class="hint">开启后，所有 API 请求必须带密钥（api_key 参数或 X-Emby-Token 头），网页端会自动附带。当前浏览器会记住密钥；其他浏览器首次打开时，在地址后加 ?api_key=密钥 访问一次即可记住。开启前请先复制保存好密钥，丢失密钥将无法通过网页管理（需在数据库中清除 api_auth_required 恢复）。</div>
+        </div>
+      </div>
+
+      <div class="modcard" data-mod="users" id="mod-users">
+        <div class="modhead"><h3>用户管理</h3><span class="modarrow">▾</span></div>
+        <div class="modbody">
+          <div id="userAdminSection" style="display:none">
+            <div id="userList"></div>
+            <form id="newUserForm" style="margin-top:12px">
+              <div class="pathrow">
+                <input type="text" id="nuName" placeholder="用户名" autocomplete="off"
+                  style="flex:1;background:var(--panel);border:1px solid var(--line);color:var(--text);border-radius:8px;padding:9px 12px;font-size:14px;outline:none">
+                <input type="password" id="nuPw" placeholder="密码" autocomplete="new-password"
+                  style="flex:1;background:var(--panel);border:1px solid var(--line);color:var(--text);border-radius:8px;padding:9px 12px;font-size:14px;outline:none">
+              </div>
+              <div style="display:flex;align-items:center;gap:12px;margin-top:10px">
+                <label style="display:flex;align-items:center;gap:6px;font-size:13px;color:var(--muted);cursor:pointer">
+                  <input type="checkbox" id="nuAdmin" style="width:15px;height:15px"> 管理员
+                </label>
+                <button type="submit" class="btn small">＋ 新建用户</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      </div>
+
+      <div class="modcard" data-mod="account" id="mod-account">
+        <div class="modhead"><h3>我的账号</h3><span class="modarrow">▾</span></div>
+        <div class="modbody">
+          <div class="hint" id="meLine" style="margin-bottom:10px">—</div>
+          <div class="pathrow">
+            <input type="password" id="myPw" placeholder="新密码" autocomplete="new-password"
+              style="flex:1;background:var(--panel);border:1px solid var(--line);color:var(--text);border-radius:8px;padding:9px 12px;font-size:14px;outline:none">
+            <button type="button" class="btn small" id="myPwSave">修改我的密码</button>
+            <button type="button" class="btn small" id="logoutBtn">退出登录</button>
+          </div>
+        </div>
+      </div>
       </div>
     </div>
-  </div>
-</div>
+  </section>
+</main>
 
 <!-- folder picker -->
 <div class="overlay" id="pickerOverlay" style="z-index:100">
@@ -785,11 +905,13 @@ function makeContinueCard(it) {
   return d;
 }
 const KIND_EN = { movie: "MOVIES", series: "TV SHOWS", mixed: "MIXED" };
-function makeLibCard(lib) {
-  const d = document.createElement("div");
-  d.className = "libcard";
+// libCardInnerFallback is the pre-batch-28 client-side collage,
+// kept as the fallback when the library has no cover image at all
+// (the cover endpoint 404s only when there is neither an uploaded /
+// generated cover nor any artwork to compose one from).
+function libCardInnerFallback(lib) {
   const thumbs = lib.Thumbs || [];
-  let inner = '<div class="lmain">';
+  let inner = "";
   if (thumbs.length) {
     inner += '<img class="lbg fimg" loading="lazy" decoding="async" src="' + kurl("/api/items/" + thumbs[0] + "/image/backdrop?w=640") + '" alt="" onerror="if(!this.dataset.f){this.dataset.f=1;this.src=\'' + kurl("/api/items/" + thumbs[0] + "/image/poster?w=640") + '\'}else{this.remove()}">';
   }
@@ -800,24 +922,37 @@ function makeLibCard(lib) {
     inner += '<div class="lstack">' + thumbs.slice(0, 3).map(id =>
       '<img class="fimg" loading="lazy" decoding="async" src="' + kurl("/api/items/" + id + "/image/backdrop?w=240") + '" alt="" onerror="if(!this.dataset.f){this.dataset.f=1;this.src=\'' + kurl("/api/items/" + id + "/image/poster?w=240") + '\'}else{this.remove()}">').join("") + "</div>";
   }
-  inner += "</div>";
-  inner += '<div class="lcap">' + esc(lib.Name) + "</div>";
-  d.innerHTML = inner;
+  return inner;
+}
+function makeLibCard(lib) {
+  const d = document.createElement("div");
+  d.className = "libcard";
+  const main = document.createElement("div");
+  main.className = "lmain";
+  main.innerHTML = '<img class="lbg fimg" loading="lazy" decoding="async" src="' + kurl("/api/libraries/" + lib.Id + "/image?w=960") + '" alt="">' +
+    '<div class="lshade"></div>' +
+    '<div class="linfo"><div class="lname">' + esc(lib.Name) + '</div>' +
+    '<div class="lkind">' + (KIND_EN[lib.Kind] || "MIXED") + "</div></div>";
+  const img = main.querySelector("img");
+  img.addEventListener("error", () => { main.innerHTML = libCardInnerFallback(lib); });
+  d.appendChild(main);
+  const cap = document.createElement("div");
+  cap.className = "lcap";
+  cap.textContent = lib.Name;
+  d.appendChild(cap);
   d.addEventListener("click", () => showLibrary(lib));
   return d;
 }
 
-/* ---------------- navigation / views / drawer ---------------- */
+/* ---------------- navigation / views ---------------- */
 let LIBS = [];
-let currentView = "home";   // home | fav | grid | detail
-let drawerActive = "home";  // home | fav | lib:<id>
+let currentView = "home";   // home | fav | grid | detail | settings
 function showView(name) {
   currentView = name;
-  const secs = { home: $("#view-home"), fav: $("#view-fav"), grid: $("#view-grid"), detail: $("#view-detail") };
-  secs.home.style.display = name === "home" ? "" : "none";
-  secs.fav.style.display = name === "fav" ? "" : "none";
-  secs.grid.style.display = name === "grid" ? "" : "none";
-  secs.detail.style.display = name === "detail" ? "" : "none";
+  const secs = { home: $("#view-home"), fav: $("#view-fav"), grid: $("#view-grid"), detail: $("#view-detail"), settings: $("#view-settings") };
+  for (const k of Object.keys(secs)) {
+    if (secs[k]) secs[k].style.display = name === k ? "" : "none";
+  }
   $("#tabHome").classList.toggle("on", name === "home" || name === "grid");
   $("#tabFav").classList.toggle("on", name === "fav");
   // Entrance motion: restart the CSS animation on the incoming view
@@ -828,44 +963,77 @@ function showView(name) {
     void sec.offsetWidth;
     sec.classList.add("view-in");
   }
-  closeDrawer();
+  hideUserMenu();
+  hideSearchDrop();
 }
-function renderDrawer() {
-  const nav = $("#drawerNav");
-  nav.innerHTML = "";
-  const mk = (label, key, fn) => {
-    const a = document.createElement("a");
-    a.textContent = label;
-    if (drawerActive === key) a.className = "on";
-    a.addEventListener("click", fn);
-    nav.appendChild(a);
-    return a;
-  };
-  mk("首页", "home", showHome);
-  mk("收藏夹", "fav", showFavorites);
-  const sec = document.createElement("div");
-  sec.className = "dsec";
-  sec.textContent = "媒体库";
-  nav.appendChild(sec);
-  LIBS.forEach(l => mk(l.Name, "lib:" + l.Id, () => showLibrary(l)));
-  const div = document.createElement("div");
-  div.className = "ddiv";
-  nav.appendChild(div);
-  mk("设置", "settings", openSettings);
-}
-function openDrawer() { $("#drawer").classList.add("open"); $("#drawerShade").classList.add("open"); }
-function closeDrawer() { $("#drawer").classList.remove("open"); $("#drawerShade").classList.remove("open"); }
-$("#burger").addEventListener("click", () => {
-  if ($("#drawer").classList.contains("open")) closeDrawer(); else openDrawer();
-});
-$("#drawerShade").addEventListener("click", closeDrawer);
 $("#logo").addEventListener("click", showHome);
 $("#tabHome").addEventListener("click", showHome);
 $("#tabFav").addEventListener("click", showFavorites);
-function showHome() { drawerActive = "home"; renderDrawer(); showView("home"); window.scrollTo(0, 0); }
+$("#gearBtn").addEventListener("click", showSettings);
+function showHome() { showView("home"); window.scrollTo(0, 0); }
+
+/* ---------------- avatar menu ---------------- */
+function hideUserMenu() { const m = $("#userMenu"); if (m) m.classList.remove("open"); }
+function renderUserMenu() {
+  const m = $("#userMenu");
+  if (!m) return;
+  const name = ME && ME.name ? ME.name : "未登录";
+  m.innerHTML = '<div class="um-head">' + esc(name) + (ME && ME.isAdmin ? ' <span style="color:var(--muted);font-size:12px">管理员</span>' : "") + "</div>";
+  const bSet = document.createElement("button");
+  bSet.textContent = "设置";
+  bSet.addEventListener("click", () => { hideUserMenu(); showSettings(); });
+  const bOut = document.createElement("button");
+  bOut.textContent = "退出登录";
+  bOut.addEventListener("click", () => { hideUserMenu(); doLogout(); });
+  m.appendChild(bSet);
+  m.appendChild(bOut);
+}
+$("#avatarBtn").addEventListener("click", e => {
+  e.stopPropagation();
+  renderUserMenu();
+  $("#userMenu").classList.toggle("open");
+});
+document.addEventListener("click", e => {
+  const m = $("#userMenu");
+  if (m && m.classList.contains("open") && !m.contains(e.target)) hideUserMenu();
+});
+
+/* ---------------- settings page: module cards & chips ---------------- */
+function initModuleCards() {
+  document.querySelectorAll(".modcard").forEach(card => {
+    const key = card.dataset.mod;
+    if (localStorage.getItem("yk_mod_" + key) === "1") card.classList.add("closed");
+    card.querySelector(".modhead").addEventListener("click", () => {
+      const closed = card.classList.toggle("closed");
+      localStorage.setItem("yk_mod_" + key, closed ? "1" : "0");
+    });
+  });
+  document.querySelectorAll("#setChips .setchip").forEach(chip => {
+    chip.addEventListener("click", () => {
+      const card = document.getElementById("mod-" + chip.dataset.mod);
+      if (!card) return;
+      card.classList.remove("closed");
+      localStorage.setItem("yk_mod_" + chip.dataset.mod, "0");
+      card.scrollIntoView({ behavior: "smooth", block: "start" });
+    });
+  });
+}
+async function showSettings() {
+  showView("settings");
+  window.scrollTo(0, 0);
+  closeLibForm();
+  await renderLibList();
+  refreshStatsLine();
+  refreshTMDBSetting();
+  refreshAPIKeySetting();
+  refreshUsers();
+  loadJobs();
+  loadCover();
+  try { $("#scanStat").textContent = fmtScanStatus(await api("/api/scan/status")); } catch (e) {}
+}
 
 /* ---------------- home (Emby layout) ---------------- */
-function rowSection(title, railEl, onTitle) {
+function rowSection(title, railEl, onTitle, colKey) {
   const sec = document.createElement("div");
   sec.className = "row";
   const head = document.createElement("div");
@@ -877,6 +1045,21 @@ function rowSection(title, railEl, onTitle) {
     h2.addEventListener("click", onTitle);
   }
   head.appendChild(h2);
+  if (colKey) {
+    const arrow = document.createElement("span");
+    arrow.className = "colarrow";
+    const key = "yk_col_" + colKey;
+    let closed = localStorage.getItem(key) === "1";
+    arrow.textContent = closed ? "▸" : "▾";
+    if (closed) railEl.style.display = "none";
+    arrow.addEventListener("click", () => {
+      closed = !closed;
+      railEl.style.display = closed ? "none" : "";
+      arrow.textContent = closed ? "▸" : "▾";
+      localStorage.setItem(key, closed ? "1" : "0");
+    });
+    head.appendChild(arrow);
+  }
   sec.appendChild(head);
   sec.appendChild(railEl);
   return sec;
@@ -885,23 +1068,15 @@ async function loadHome() {
   try {
     const home = await api("/api/home");
     LIBS = home.Libraries || [];
-    renderDrawer();
     const secs = $("#homeSecs");
     secs.innerHTML = "";
     let any = false;
     if (LIBS.length) {
       any = true;
-      const sec = document.createElement("div");
-      sec.className = "row";
-      const head = document.createElement("div");
-      head.className = "rowhead";
-      head.innerHTML = "<h2>我的媒体</h2>";
       const grid = document.createElement("div");
       grid.className = "libgrid";
       LIBS.forEach(l => grid.appendChild(makeLibCard(l)));
-      sec.appendChild(head);
-      sec.appendChild(grid);
-      secs.appendChild(sec);
+      secs.appendChild(rowSection("我的媒体", grid, null, "home_libs"));
     }
     const cont = home.ContinueWatching || [];
     if (cont.length) {
@@ -909,7 +1084,7 @@ async function loadHome() {
       const rail = document.createElement("div");
       rail.className = "rail";
       cont.forEach(it => rail.appendChild(makeContinueCard(it)));
-      secs.appendChild(rowSection("继续观看", rail, null));
+      secs.appendChild(rowSection("继续观看", rail, null, "continue"));
     }
     for (const lib of LIBS) {
       try {
@@ -919,7 +1094,7 @@ async function loadHome() {
         const rail = document.createElement("div");
         rail.className = "rail";
         page.Items.forEach(it => rail.appendChild(makeCard(it)));
-        secs.appendChild(rowSection("最新" + lib.Name + " ›", rail, () => showLibrary(lib)));
+        secs.appendChild(rowSection("最新" + lib.Name + " ›", rail, () => showLibrary(lib), "row_" + lib.Id));
       } catch (e) { /* one failing row must not break the home page */ }
     }
     $("#homeEmpty").style.display = any ? "none" : "";
@@ -930,8 +1105,6 @@ async function loadHome() {
 
 /* ---------------- favorites ---------------- */
 async function showFavorites() {
-  drawerActive = "fav";
-  renderDrawer();
   showView("fav");
   window.scrollTo(0, 0);
   const box = $("#favGrid");
@@ -949,8 +1122,6 @@ async function showFavorites() {
 /* ---------------- library grid & search ---------------- */
 const grid = { libId: null, cursor: "", loading: false, started: false };
 async function showLibrary(lib) {
-  drawerActive = "lib:" + lib.Id;
-  renderDrawer();
   showView("grid");
   window.scrollTo(0, 0);
   $("#gridTitle").textContent = lib.Name;
@@ -1171,7 +1342,7 @@ function renderDetail(d, ctx) {
     h += '<div class="dsec">播出季</div><div class="seasonrail">';
     d.Seasons.forEach(sn => {
       h += '<div class="scard" data-season="' + sn.Id + '"><div class="swrap">';
-      h += '<img class="fimg" loading="lazy" decoding="async" src="' + kurl("/api/items/" + d.Id + "/image/poster?w=240") + '" alt="" onerror="this.remove()">';
+      h += '<img class="fimg" loading="lazy" decoding="async" src="' + kurl("/api/items/" + sn.Id + "/image/poster?w=240") + '" alt="" onerror="this.remove()">';
       h += '<div class="fb" style="background:' + gradFor(d.Name) + '">' + esc(sn.Name) + "</div>";
       h += '<span class="cntbadge">' + (sn.Episodes || []).length + " 集</span></div>";
       h += '<div class="snm">' + esc(sn.Name) + "</div></div>";
@@ -1474,7 +1645,8 @@ document.addEventListener("keydown", e => {
   if (e.key === "Escape") {
     if ($("#playerOverlay").classList.contains("open")) closePlayer();
     document.querySelectorAll(".overlay.open").forEach(ov => ov.classList.remove("open"));
-    closeDrawer();
+    hideUserMenu();
+    hideSearchDrop();
   }
 });
 let confirmResolve = null;
@@ -1503,12 +1675,11 @@ async function renderLibList() {
   try {
     const libs = await api("/api/libraries");
     LIBS = libs;
-    renderDrawer();
     if (!libs.length) {
       box.innerHTML = '<div class="hint" style="padding:10px 6px">还没有媒体库，点下方按钮新建。</div>';
       return;
     }
-    libs.forEach(l => {
+    libs.forEach((l, idx) => {
       const row = document.createElement("div");
       row.className = "librow";
       row.innerHTML = '<span class="nm">' + esc(l.Name) + '</span>' +
@@ -1516,6 +1687,15 @@ async function renderLibList() {
         '<span class="inf">' + l.ItemCount + " 条 · " + (l.Paths || []).length + " 个路径</span>";
       const ops = document.createElement("div");
       ops.className = "ops";
+      const bUp = document.createElement("button");
+      bUp.className = "btn small"; bUp.textContent = "↑"; bUp.title = "上移（主页显示顺序）";
+      bUp.disabled = idx === 0;
+      bUp.addEventListener("click", () => moveLib(l.Id, -1));
+      const bDown = document.createElement("button");
+      bDown.className = "btn small"; bDown.textContent = "↓"; bDown.title = "下移（主页显示顺序）";
+      bDown.disabled = idx === libs.length - 1;
+      bDown.addEventListener("click", () => moveLib(l.Id, 1));
+      ops.appendChild(bUp); ops.appendChild(bDown);
       const bEdit = document.createElement("button");
       bEdit.className = "btn small"; bEdit.textContent = "编辑";
       bEdit.addEventListener("click", () => openLibForm(l));
@@ -1540,6 +1720,20 @@ async function renderLibList() {
   } catch (e) {
     toast("加载媒体库失败：" + e.message);
   }
+}
+async function moveLib(id, dir) {
+  const ids = LIBS.map(l => l.Id);
+  const i = ids.indexOf(id);
+  const j = i + dir;
+  if (i < 0 || j < 0 || j >= ids.length) return;
+  const tmp = ids[i]; ids[i] = ids[j]; ids[j] = tmp;
+  try {
+    await api("/api/libraries/order", {
+      method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ids })
+    });
+    await renderLibList();
+    loadHome();
+  } catch (e) { toast("排序失败：" + e.message); }
 }
 function addPathRow(value) {
   const row = document.createElement("div");
@@ -1611,6 +1805,7 @@ function fmtScanStatus(s) {
   const map = { idle: "空闲", running: "扫描中", done: "已完成", error: "出错" };
   let t = "状态：" + (map[s.state] || s.state);
   t += " · 库 " + s.libraries + " · 写入 " + s.items + " · 跳过 " + s.skipped + " · 删除 " + s.deleted;
+  if (s.watchDirs) t += " · 监控目录 " + s.watchDirs;
   if (s.error) t += " · " + s.error;
   return t;
 }
@@ -1640,18 +1835,127 @@ async function triggerScan(url, okMsg) {
   }
 }
 $("#scanAllBtn").addEventListener("click", () => triggerScan("/api/scan", "全库扫描已开始"));
-async function openSettings() {
-  openOverlay("settingsOverlay");
-  closeLibForm();
-  await renderLibList();
-  refreshStatsLine();
-  refreshTMDBSetting();
-  refreshAPIKeySetting();
-  refreshUsers();
-  try { $("#scanStat").textContent = fmtScanStatus(await api("/api/scan/status")); } catch (e) {}
+/* ---------------- settings: scheduled jobs ---------------- */
+function fmtUnixTime(ts) {
+  if (!ts) return "从未运行";
+  return new Date(ts * 1000).toLocaleString("zh-CN", { hour12: false });
+}
+const JOB_EVERY_OPTIONS = [[6, "每 6 小时"], [12, "每 12 小时"], [24, "每天"], [168, "每周"]];
+async function loadJobs() {
+  const box = $("#jobsList");
+  if (!box) return;
+  try {
+    const res = await api("/api/jobs");
+    box.innerHTML = "";
+    (res.Jobs || []).forEach(j => box.appendChild(jobCardEl(j)));
+  } catch (e) {
+    box.innerHTML = '<div class="hint">加载计划任务失败：' + esc(e.message) + "</div>";
+  }
+}
+function jobCardEl(j) {
+  const card = document.createElement("div");
+  card.className = "jobcard";
+  let h = "<h4>" + esc(j.label) + "</h4>";
+  h += '<div class="jdesc">' + esc(j.description) + "</div>";
+  if (j.pending != null) {
+    h += '<div class="jrow"><span style="color:var(--muted)">待处理</span><b>' + j.pending + "</b><span>条</span></div>";
+  }
+  h += '<div class="jrow"><label class="switch"><input type="checkbox" class="jenabled"' + (j.enabled ? " checked" : "") + '><i></i></label>' +
+    '<span>' + (j.enabled ? "已启用" : "已停用") + "</span>" +
+    '<select class="jevery" style="margin-left:auto;background:var(--panel);border:1px solid var(--line);color:var(--text);border-radius:8px;padding:6px 8px;font-size:13px">' +
+    JOB_EVERY_OPTIONS.map(o => '<option value="' + o[0] + '"' + (o[0] === j.everyHours ? " selected" : "") + ">" + o[1] + "</option>").join("") +
+    "</select></div>";
+  h += '<div class="jlast">上次：' + fmtUnixTime(j.lastRun) + (j.lastResult ? "<br>" + esc(j.lastResult) : "") + "</div>";
+  h += '<div class="jfoot"><button class="btn small jrun"' + (j.running ? " disabled" : "") + ">" + (j.running ? "运行中…" : "立即运行") + "</button></div>";
+  card.innerHTML = h;
+  const put = async patch => {
+    try {
+      await api("/api/jobs/" + j.name, {
+        method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(patch)
+      });
+      loadJobs();
+    } catch (e) { toast("保存任务设置失败：" + e.message); loadJobs(); }
+  };
+  card.querySelector(".jenabled").addEventListener("change", e => put({ enabled: e.target.checked }));
+  card.querySelector(".jevery").addEventListener("change", e => put({ everyHours: parseInt(e.target.value, 10) }));
+  card.querySelector(".jrun").addEventListener("click", async () => {
+    try {
+      await api("/api/jobs/" + j.name + "/run", { method: "POST" });
+      toast("「" + j.label + "」已开始运行");
+      setTimeout(loadJobs, 1200);
+      setTimeout(loadJobs, 5000);
+    } catch (e) { toast("运行失败：" + e.message); }
+  });
+  return card;
 }
 
+/* ---------------- settings: cover generation ---------------- */
+const COVER_STYLE_LABELS = {
+  editorial: ["杂志编辑", "雅宋衬线 · 三图拼版"],
+  cinematic: ["电影感", "全幅剧照 · 大字标题"],
+  retro: ["复古胶片", "做旧色调 · 胶片边框"],
+  editorial_big: ["大图编辑", "一大两小 · 杂志排版"],
+  noir: ["黑白纪实", "黑白高反差"]
+};
+let coverState = null;
+async function loadCover() {
+  try {
+    coverState = await api("/api/cover");
+    renderCover();
+  } catch (e) { /* settings page may not be open yet */ }
+}
+function renderCover() {
+  if (!coverState) return;
+  const stylesBox = $("#coverStyles");
+  stylesBox.innerHTML = "";
+  (coverState.styles || []).forEach(name => {
+    const info = COVER_STYLE_LABELS[name] || [name, ""];
+    const el = document.createElement("div");
+    el.className = "coverstyle" + (name === coverState.style ? " on" : "");
+    el.innerHTML = '<div class="csn">' + esc(info[0]) + '</div><div class="csd">' + esc(info[1]) + "</div>";
+    el.addEventListener("click", () => putCover({ style: name }));
+    stylesBox.appendChild(el);
+  });
+  $("#coverSort").value = coverState.sort || "datecreated";
+  $("#coverLast").textContent = coverState.running ? "生成中…" :
+    (coverState.lastRun ? "上次：" + fmtUnixTime(coverState.lastRun) + (coverState.lastResult ? " · " + coverState.lastResult : "") : "尚未生成");
+  $("#coverGenBtn").disabled = !!coverState.running;
+  const wall = $("#coverLibs");
+  wall.innerHTML = "";
+  (coverState.libraries || []).forEach(l => {
+    const el = document.createElement("div");
+    el.className = "coverlib";
+    el.innerHTML = '<img loading="lazy" src="' + kurl("/api/libraries/" + l.id + "/image?w=320") + '" alt="" onerror="this.style.visibility=\'hidden\'">' +
+      '<div class="cnm"><span>' + esc(l.name) + '</span><span class="cbadge">' + (l.hasCover ? "已生成" : "未生成") + "</span></div>";
+    el.addEventListener("click", () => generateCover(l.id, l.name));
+    wall.appendChild(el);
+  });
+}
+async function putCover(patch) {
+  try {
+    coverState = await api("/api/cover", {
+      method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(patch)
+    });
+    renderCover();
+  } catch (e) { toast("保存封面设置失败：" + e.message); }
+}
+$("#coverSort").addEventListener("change", e => putCover({ sort: e.target.value }));
+async function generateCover(libId, libName) {
+  try {
+    await api("/api/cover/generate", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(libId ? { libraryId: libId } : {})
+    });
+    toast(libId ? "「" + libName + "」封面生成已开始" : "全部封面生成已开始");
+    setTimeout(loadCover, 2500);
+    setTimeout(loadCover, 8000);
+    setTimeout(loadCover, 20000);
+  } catch (e) { toast("生成失败：" + e.message); }
+}
+$("#coverGenBtn").addEventListener("click", () => generateCover(0, ""));
+
 /* ---------------- settings: TMDB ---------------- */
+let tmdbBaseLoaded = false;
 async function refreshTMDBSetting() {
   try {
     const s = await api("/api/settings");
@@ -1659,21 +1963,57 @@ async function refreshTMDBSetting() {
     input.value = "";
     input.placeholder = s.tmdbKeySet ? "已设置（输入新值可覆盖）" : "未设置";
     $("#tmdbBase").value = s.tmdbBaseUrl || "";
+    // The base field now holds the loaded value: its save button may
+    // be enabled (it stays disabled until this load completes, so an
+    // early save can never wipe the stored base).
+    tmdbBaseLoaded = true;
+    $("#tmdbSaveBase").disabled = false;
+    $("#doubanAssist").checked = s.doubanAssist !== false;
   } catch (e) { /* keep placeholder */ }
 }
-$("#tmdbSave").addEventListener("click", async () => {
+// Key and base are saved separately (batch 28): saving one can
+// never clobber the other.
+$("#tmdbSaveKey").addEventListener("click", async () => {
   try {
     const s = await api("/api/settings", {
       method: "PUT", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        tmdbApiKey: $("#tmdbKey").value.trim(),
-        tmdbBaseUrl: $("#tmdbBase").value.trim()
-      })
+      body: JSON.stringify({ tmdbApiKey: $("#tmdbKey").value.trim() })
     });
-    toast(s.tmdbKeySet ? "TMDB 设置已保存" : "TMDB 设置已保存（Key 未设置）");
+    toast(s.tmdbKeySet ? "TMDB Key 已保存" : "TMDB Key 已清除");
     refreshTMDBSetting();
   } catch (e) {
-    toast("保存 TMDB 设置失败：" + e.message);
+    toast("保存 Key 失败：" + e.message);
+  }
+});
+$("#tmdbProxyBtn").addEventListener("click", () => {
+  $("#tmdbBase").value = "https://tmdb.lxcnas.kdns.fr";
+  $("#tmdbBase").focus();
+});
+$("#tmdbSaveBase").addEventListener("click", async () => {
+  if (!tmdbBaseLoaded) { toast("基址尚未加载完成，请稍候"); return; }
+  const v = $("#tmdbBase").value.trim();
+  if (!v) { toast("基址为空会保留现值；要恢复官方默认请填 https://api.themoviedb.org/3"); return; }
+  try {
+    await api("/api/settings", {
+      method: "PUT", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ tmdbBaseUrl: v })
+    });
+    toast("TMDB 基址已保存");
+    refreshTMDBSetting();
+  } catch (e) {
+    toast("保存基址失败：" + e.message);
+  }
+});
+$("#doubanAssist").addEventListener("change", async e => {
+  try {
+    await api("/api/settings", {
+      method: "PUT", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ doubanAssist: e.target.checked })
+    });
+    toast(e.target.checked ? "豆瓣辅助已启用" : "豆瓣辅助已关闭");
+  } catch (err) {
+    toast("保存豆瓣辅助开关失败：" + err.message);
+    e.target.checked = !e.target.checked;
   }
 });
 
@@ -1818,6 +2158,8 @@ function hideAuth() { $("#authScreen").style.display = "none"; }
 function enterApp(me) {
   ME = me;
   hideAuth();
+  if (me && me.name) $("#avatarBtn").textContent = me.name.slice(0, 1);
+  initModuleCards();
   loadHome();
 }
 async function boot() {
@@ -1858,13 +2200,14 @@ $("#bootstrapForm").addEventListener("submit", async e => {
     $("#bootErr").textContent = "创建失败：" + err.message;
   }
 });
-$("#logoutBtn").addEventListener("click", async () => {
+async function doLogout() {
   try { await api("/api/auth/logout", { method: "POST" }); } catch (e) {}
   setAuthToken("");
   setAPIKey("");
   ME = null;
   location.reload();
-});
+}
+$("#logoutBtn").addEventListener("click", doLogout);
 $("#myPwSave").addEventListener("click", async () => {
   const pw = $("#myPw").value;
   if (!pw) { toast("先输入新密码"); return; }
@@ -1886,6 +2229,8 @@ $("#myPwSave").addEventListener("click", async () => {
 async function refreshUsers() {
   const isAdmin = !!(ME && (ME.isAdmin || ME.serverKey));
   $("#userAdminSection").style.display = isAdmin ? "" : "none";
+  const modUsers = $("#mod-users");
+  if (modUsers) modUsers.style.display = isAdmin ? "" : "none";
   $("#meLine").textContent = ME
     ? "当前登录：" + ME.name + (ME.isAdmin ? "（管理员）" : "") + (ME.serverKey ? "（服务端密钥会话）" : "")
     : "—";
@@ -1996,7 +2341,47 @@ $("#search").addEventListener("input", e => {
   clearTimeout(searchTimer);
   const q = e.target.value.trim();
   searchTimer = setTimeout(() => { if (q) doSearch(q); else showHome(); }, 300);
+  clearTimeout(dropTimer);
+  if (q) dropTimer = setTimeout(() => refreshSearchDrop(q), 200);
+  else hideSearchDrop();
 });
+$("#search").addEventListener("keydown", e => {
+  if (e.key === "Enter") {
+    const q = e.target.value.trim();
+    hideSearchDrop();
+    if (q) { clearTimeout(searchTimer); doSearch(q); }
+  } else if (e.key === "Escape") {
+    hideSearchDrop();
+  }
+});
+document.addEventListener("click", e => {
+  const drop = $("#searchDrop");
+  if (drop && drop.classList.contains("open") && !drop.contains(e.target) && e.target.id !== "search") hideSearchDrop();
+});
+
+/* ---------------- search dropdown (batch 28) ---------------- */
+let dropTimer = null;
+function hideSearchDrop() { const d = $("#searchDrop"); if (d) d.classList.remove("open"); }
+async function refreshSearchDrop(q) {
+  const drop = $("#searchDrop");
+  if (!drop) return;
+  try {
+    const res = await api("/api/search?q=" + encodeURIComponent(q) + "&limit=8");
+    const items = (res.Items || []).filter(it => it.Type === "Movie" || it.Type === "Series");
+    if (!items.length) { hideSearchDrop(); return; }
+    drop.innerHTML = "";
+    items.forEach(it => {
+      const row = document.createElement("div");
+      row.className = "srow";
+      row.innerHTML = '<img loading="lazy" src="' + kurl("/api/items/" + it.Id + "/image/poster?w=80") + '" alt="" onerror="this.style.visibility=\'hidden\'">' +
+        '<div style="min-width:0"><div class="st">' + esc(it.Name) + '</div>' +
+        '<div class="sm">' + (it.ProductionYear ? it.ProductionYear + " · " : "") + (it.Type === "Movie" ? "电影" : "剧集") + "</div></div>";
+      row.addEventListener("click", () => { hideSearchDrop(); openDetail(it.Id); });
+      drop.appendChild(row);
+    });
+    drop.classList.add("open");
+  } catch (e) { hideSearchDrop(); }
+}
 window.addEventListener("scroll", () => {
   $("#topbar").classList.toggle("scrolled", window.scrollY > 30);
 }, { passive: true });
