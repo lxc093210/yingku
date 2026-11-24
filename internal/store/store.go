@@ -10,6 +10,14 @@ import (
 	"strings"
 )
 
+// Library source types (batch 29): local libraries scan local
+// folders; alist libraries have exactly one remote root path on an
+// Alist server and are scanned/played through its API.
+const (
+	SourceTypeLocal = "local"
+	SourceTypeAlist = "alist"
+)
+
 // Library is a managed collection of one or more root paths
 // (e.g. 动画电影) of kind movie|series|mixed.
 type Library struct {
@@ -21,6 +29,8 @@ type Library struct {
 	// SortOrder is the display order on the home page (batch 28);
 	// lower comes first. Edited via SetLibraryOrder.
 	SortOrder int
+	// SourceType is SourceTypeLocal or SourceTypeAlist (batch 29).
+	SourceType string
 }
 
 // ErrPathOwned is returned when a root path already belongs to another library.
@@ -205,8 +215,17 @@ func (s *Store) checkPathsFree(paths []string, excludeID int64) error {
 	return nil
 }
 
-// CreateLibrary inserts a new library with the given root paths.
+// CreateLibrary inserts a new local library with the given root paths.
 func (s *Store) CreateLibrary(name, kind string, paths []string) (int64, error) {
+	return s.CreateLibraryWithType(name, kind, SourceTypeLocal, paths)
+}
+
+// CreateLibraryWithType inserts a new library of the given source
+// type (batch 29). An unknown/empty source type is treated as local.
+func (s *Store) CreateLibraryWithType(name, kind, sourceType string, paths []string) (int64, error) {
+	if sourceType != SourceTypeAlist {
+		sourceType = SourceTypeLocal
+	}
 	if err := s.checkPathsFree(paths, 0); err != nil {
 		return 0, err
 	}
@@ -216,8 +235,8 @@ func (s *Store) CreateLibrary(name, kind string, paths []string) (int64, error) 
 	}
 	defer tx.Rollback()
 	var id int64
-	if err := tx.QueryRow(`INSERT INTO libraries(name, kind, path) VALUES (?, ?, ?) RETURNING id`,
-		name, kind, paths[0]).Scan(&id); err != nil {
+	if err := tx.QueryRow(`INSERT INTO libraries(name, kind, path, source_type) VALUES (?, ?, ?, ?) RETURNING id`,
+		name, kind, paths[0], sourceType).Scan(&id); err != nil {
 		return 0, err
 	}
 	for _, p := range paths {
@@ -236,8 +255,17 @@ func (s *Store) CreateLibrary(name, kind string, paths []string) (int64, error) 
 	return id, nil
 }
 
-// UpdateLibrary replaces a library's name, kind and root paths.
+// UpdateLibrary replaces a local library's name, kind and root paths.
 func (s *Store) UpdateLibrary(id int64, name, kind string, paths []string) error {
+	return s.UpdateLibraryWithType(id, name, kind, SourceTypeLocal, paths)
+}
+
+// UpdateLibraryWithType replaces a library's name, kind, source type
+// and root paths (batch 29).
+func (s *Store) UpdateLibraryWithType(id int64, name, kind, sourceType string, paths []string) error {
+	if sourceType != SourceTypeAlist {
+		sourceType = SourceTypeLocal
+	}
 	if err := s.checkPathsFree(paths, id); err != nil {
 		return err
 	}
@@ -246,8 +274,8 @@ func (s *Store) UpdateLibrary(id int64, name, kind string, paths []string) error
 		return err
 	}
 	defer tx.Rollback()
-	res, err := tx.Exec(`UPDATE libraries SET name = ?, kind = ?, path = ? WHERE id = ?`,
-		name, kind, paths[0], id)
+	res, err := tx.Exec(`UPDATE libraries SET name = ?, kind = ?, path = ?, source_type = ? WHERE id = ?`,
+		name, kind, paths[0], sourceType, id)
 	if err != nil {
 		return err
 	}
@@ -504,7 +532,7 @@ func (s *Store) ListLibraries() ([]Library, error) {
 	rows, err := s.db.Query(`
 		SELECT l.id, l.name, l.kind,
 			(SELECT COUNT(*) FROM items i WHERE i.library_id = l.id AND i.parent_id IS NULL),
-			l.sort_order
+			l.sort_order, l.source_type
 		FROM libraries l ORDER BY l.sort_order, l.id`)
 	if err != nil {
 		return nil, err
@@ -512,9 +540,12 @@ func (s *Store) ListLibraries() ([]Library, error) {
 	var out []Library
 	for rows.Next() {
 		var l Library
-		if err := rows.Scan(&l.ID, &l.Name, &l.Kind, &l.ItemCount, &l.SortOrder); err != nil {
+		if err := rows.Scan(&l.ID, &l.Name, &l.Kind, &l.ItemCount, &l.SortOrder, &l.SourceType); err != nil {
 			rows.Close()
 			return nil, err
+		}
+		if l.SourceType == "" {
+			l.SourceType = SourceTypeLocal
 		}
 		l.Paths = []string{}
 		out = append(out, l)

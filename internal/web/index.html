@@ -278,6 +278,7 @@
     background:var(--panel2);border:1px solid var(--line);color:#d6d8db}
   .kind.movie{border-color:#5b2b30;color:#ff9aa2}
   .kind.series{border-color:#2b4a5b;color:#9ad1ff}
+  .kind.alist{border-color:#4a5b2b;color:#c1ff9a}
   .librow .inf{color:var(--muted);font-size:12.5px}
   .librow .ops{margin-left:auto;display:flex;gap:8px}
   .danger:hover{border-color:var(--red);color:#ff858d}
@@ -567,9 +568,21 @@
               <option value="series">电视剧</option>
               <option value="mixed">混合</option>
             </select>
-            <label id="fPathsLabel">根文件夹（可多个）</label>
-            <div id="fPaths"></div>
-            <button type="button" class="btn small" id="addPathBtn">＋ 添加路径</button>
+            <label>来源</label>
+            <select id="fSourceType">
+              <option value="local">本地文件夹</option>
+              <option value="alist">Alist 远程</option>
+            </select>
+            <div id="localPathsBlock">
+              <label id="fPathsLabel">根文件夹（可多个）</label>
+              <div id="fPaths"></div>
+              <button type="button" class="btn small" id="addPathBtn">＋ 添加路径</button>
+            </div>
+            <div id="alistPathBlock" style="display:none">
+              <label>远程根路径（Alist 上的目录，只按文件夹名刮削、播放走 Alist 直链）</label>
+              <input type="text" id="fRemotePath" placeholder="如 /电影/4K REMUX" autocomplete="off"
+                style="width:100%;background:var(--panel);border:1px solid var(--line);color:var(--text);border-radius:8px;padding:9px 12px;font-size:14px;outline:none">
+            </div>
             <div class="modalfoot">
               <button type="button" class="btn" id="formCancel">取消</button>
               <button type="submit" class="btn red">保存</button>
@@ -651,6 +664,20 @@
             要求密钥鉴权
           </label>
           <div class="hint">开启后，所有 API 请求必须带密钥（api_key 参数或 X-Emby-Token 头），网页端会自动附带。当前浏览器会记住密钥；其他浏览器首次打开时，在地址后加 ?api_key=密钥 访问一次即可记住。开启前请先复制保存好密钥，丢失密钥将无法通过网页管理（需在数据库中清除 api_auth_required 恢复）。</div>
+          <label class="flabel" style="margin-top:18px">Alist 连接（远程媒体库）</label>
+          <div class="hint" style="margin-bottom:10px">「Alist 远程」类型的媒体库从这里连接的 Alist 服务器读取目录：只列目录、只按文件夹名刮削，绝不打开视频文件本体；播放时向 Alist 换取直链。密码只保存在本机数据库，页面不会回显，留空保存不会覆盖已存密码。</div>
+          <label class="flabel">服务器地址</label>
+          <input type="text" id="alistBase" placeholder="如 http://192.168.1.5:5678" autocomplete="off"
+            style="width:100%;background:var(--panel);border:1px solid var(--line);color:var(--text);border-radius:8px;padding:9px 12px;font-size:14px;outline:none">
+          <label class="flabel">账号</label>
+          <input type="text" id="alistUser" placeholder="Alist 登录账号" autocomplete="off"
+            style="width:100%;background:var(--panel);border:1px solid var(--line);color:var(--text);border-radius:8px;padding:9px 12px;font-size:14px;outline:none">
+          <label class="flabel">密码</label>
+          <div class="pathrow">
+            <input type="password" id="alistPass" placeholder="未设置" autocomplete="new-password"
+              style="flex:1;background:var(--panel);border:1px solid var(--line);color:var(--text);border-radius:8px;padding:9px 12px;font-size:14px;outline:none">
+            <button type="button" class="btn small" id="alistSave" disabled>保存 Alist 连接</button>
+          </div>
         </div>
       </div>
 
@@ -1684,6 +1711,7 @@ async function renderLibList() {
       row.className = "librow";
       row.innerHTML = '<span class="nm">' + esc(l.Name) + '</span>' +
         '<span class="kind ' + esc(l.Kind) + '">' + (KIND_LABEL[l.Kind] || l.Kind) + "</span>" +
+        (l.SourceType === "alist" ? '<span class="kind alist">Alist</span>' : "") +
         '<span class="inf">' + l.ItemCount + " 条 · " + (l.Paths || []).length + " 个路径</span>";
       const ops = document.createElement("div");
       ops.className = "ops";
@@ -1756,13 +1784,23 @@ function syncPathsLabel() {
   const el = $("#fPathsLabel");
   if (el) el.textContent = "根文件夹（共 " + n + " 个）";
 }
+function syncSourceType() {
+  const alist = $("#fSourceType").value === "alist";
+  $("#localPathsBlock").style.display = alist ? "none" : "";
+  $("#alistPathBlock").style.display = alist ? "" : "none";
+}
+$("#fSourceType").addEventListener("change", syncSourceType);
 function openLibForm(lib) {
   editingId = lib ? lib.Id : null;
   $("#fName").value = lib ? lib.Name : "";
   $("#fKind").value = lib ? lib.Kind : "mixed";
+  const st = lib ? (lib.SourceType || "local") : "local";
+  $("#fSourceType").value = st;
+  $("#fRemotePath").value = (lib && st === "alist" && (lib.Paths || []).length) ? lib.Paths[0] : "";
   $("#fPaths").innerHTML = "";
   if (lib && (lib.Paths || []).length) lib.Paths.forEach(p => addPathRow(p));
   else addPathRow("");
+  syncSourceType();
   $("#libForm").classList.add("open");
   $("#fName").focus();
 }
@@ -1775,10 +1813,20 @@ $("#addPathBtn").addEventListener("click", () => addPathRow(""));
 $("#formCancel").addEventListener("click", closeLibForm);
 $("#libForm").addEventListener("submit", async e => {
   e.preventDefault();
+  const sourceType = $("#fSourceType").value;
+  let paths;
+  if (sourceType === "alist") {
+    const rp = $("#fRemotePath").value.trim();
+    if (!rp) { toast("请填写 Alist 远程根路径"); return; }
+    paths = [rp];
+  } else {
+    paths = formPaths();
+  }
   const payload = {
     Name: $("#fName").value.trim(),
     Kind: $("#fKind").value,
-    Paths: formPaths()
+    SourceType: sourceType,
+    Paths: paths
   };
   try {
     if (editingId) {
@@ -2031,8 +2079,37 @@ async function refreshAPIKeySetting() {
   try {
     const s = await api("/api/settings");
     $("#apiAuthRequired").checked = !!s.apiAuthRequired;
+    // Alist connection fields ride the same load; the save button
+    // stays disabled until this completes so an early save can
+    // never send unloaded (empty) values.
+    $("#alistBase").value = s.alistBaseUrl || "";
+    $("#alistUser").value = s.alistUsername || "";
+    const pass = $("#alistPass");
+    pass.value = "";
+    pass.placeholder = s.alistPasswordSet ? "已设置（输入新值可覆盖）" : "未设置";
+    alistLoaded = true;
+    $("#alistSave").disabled = false;
   } catch (e) {}
 }
+let alistLoaded = false;
+$("#alistSave").addEventListener("click", async () => {
+  if (!alistLoaded) { toast("Alist 设置尚未加载完成，请稍候"); return; }
+  try {
+    const s = await api("/api/settings", {
+      method: "PUT", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        alistBaseUrl: $("#alistBase").value.trim(),
+        alistUsername: $("#alistUser").value.trim(),
+        alistPassword: $("#alistPass").value
+      })
+    });
+    $("#alistPass").value = "";
+    $("#alistPass").placeholder = s.alistPasswordSet ? "已设置（输入新值可覆盖）" : "未设置";
+    toast("Alist 连接已保存");
+  } catch (e) {
+    toast("保存 Alist 连接失败：" + e.message);
+  }
+});
 $("#apiKeyCopy").addEventListener("click", async () => {
   const v = $("#apiKeyInput").value;
   if (!v) { toast("密钥尚未加载"); return; }

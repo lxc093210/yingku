@@ -171,6 +171,20 @@ func Open(path string) (*Store, error) {
 			return nil, fmt.Errorf("migrate libraries sort_order values: %w", err)
 		}
 	}
+	// Migration (batch 29): libraries gained source_type — 'local'
+	// (default; roots are local folders) or 'alist' (the single root
+	// is a remote path on an Alist server).
+	has, err = columnExists(db, "libraries", "source_type")
+	if err != nil {
+		db.Close()
+		return nil, fmt.Errorf("migrate libraries: %w", err)
+	}
+	if !has {
+		if _, err := db.Exec(`ALTER TABLE libraries ADD COLUMN source_type TEXT NOT NULL DEFAULT 'local'`); err != nil {
+			db.Close()
+			return nil, fmt.Errorf("migrate libraries source_type: %w", err)
+		}
+	}
 	// Migration (batch 28): items gained search_initials — the pinyin
 	// initials of the title, used by fuzzy search. Filled by scans as
 	// items are written and by a background pass for existing rows.

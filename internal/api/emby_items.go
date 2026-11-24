@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"log"
 	"net/http"
 	"net/url"
 	"path"
@@ -671,7 +672,18 @@ func (s *Server) handleEmbyPlaybackInfo(w http.ResponseWriter, r *http.Request) 
 	}
 	src := srcs[0]
 	targetURL := ""
-	if src.StrmPath != "" {
+	if s.itemIsAlist(target) {
+		// Alist item (batch 29): MediaSource.Path is the resolved
+		// raw URL itself — clients/Nan play it directly. A failed
+		// resolution is a hard 502, never a local fallback.
+		raw, rerr := s.alistRawURL(src.StrmPath)
+		if rerr != nil {
+			log.Printf("playbackinfo: alist resolve item %d: %v", target.ID, rerr)
+			writeErr(w, http.StatusBadGateway, "alist playback resolve failed")
+			return
+		}
+		targetURL = raw
+	} else if src.StrmPath != "" {
 		targetURL = readStrmTarget(src.StrmPath)
 	}
 	name := mediaFileName(targetURL, src.StrmPath)
