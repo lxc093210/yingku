@@ -195,16 +195,6 @@ func (s *Server) jobMediainfo() string {
 	}
 	scanned := 0
 	for libID := range libSet {
-		// Batch 29c isolation: PendingMediaInfoSources already
-		// excludes Alist libraries, so an Alist id can never land
-		// in libSet — this explicit skip pins the guarantee at the
-		// trigger point too: stage ① must never start an Alist
-		// scan (a scan is cheap now, but it is still remote API
-		// traffic the mediainfo job has no business making).
-		if lib, err := s.st.GetLibrary(libID); err == nil && lib != nil &&
-			lib.SourceType == store.SourceTypeAlist {
-			continue
-		}
 		if err := s.scanner.StartLibrary(libID); err == nil {
 			scanned++
 		}
@@ -249,14 +239,6 @@ func (s *Server) waitScanIdle(timeout time.Duration) {
 // probeSource ffprobes one pending source through its STRM target
 // URL and writes the result back with provenance 'probe'.
 func (s *Server) probeSource(p store.PendingSource) bool {
-	// Batch 29c isolation: never ffprobe an Alist source — probing
-	// means opening the remote file, which the Alist model allows
-	// only at playback time. PendingMediaInfoSources already
-	// excludes Alist libraries; this guard pins it at the probe.
-	if lib, err := s.st.GetLibrary(p.LibraryID); err == nil && lib != nil &&
-		lib.SourceType == store.SourceTypeAlist {
-		return false
-	}
 	target := readStrmTarget(p.StrmPath)
 	if target == "" {
 		target = p.TargetURL

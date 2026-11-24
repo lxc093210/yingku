@@ -14,7 +14,6 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
-	"log"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -22,8 +21,6 @@ import (
 	"strings"
 	"sync"
 	"time"
-
-	"yingku/internal/alist"
 	"yingku/internal/meta"
 	"yingku/internal/scan"
 	"yingku/internal/store"
@@ -56,16 +53,6 @@ type Server struct {
 	doubanMu      sync.Mutex
 	doubanBudget  int
 	doubanStopped string
-	// Batch 29: Alist client cache (rebuilt when the connection
-	// settings change) and the resolved raw_url cache (5 min TTL).
-	// Batch 29c: alistLocks serialises playback-time folder
-	// resolution per item.
-	alistMu     sync.Mutex
-	alistCli    *alist.Client
-	alistCliKey string
-	rawMu       sync.Mutex
-	rawCache    map[string]rawURLEntry
-	alistLocks  *keyedLocks
 }
 
 // New builds the HTTP handler.
@@ -77,11 +64,7 @@ func New(st *store.Store, scanner *scan.Scanner, defaultRoot string) http.Handle
 	if abs, err := filepath.Abs(fsRoot); err == nil {
 		fsRoot = filepath.Clean(abs)
 	}
-	s := &Server{st: st, scanner: scanner, defaultRoot: defaultRoot, fsRoot: fsRoot, imgLocks: newKeyedLocks(), running: map[string]bool{}, douban: meta.NewDoubanClient(), doubanBudget: doubanRoundBudget, rawCache: map[string]rawURLEntry{}, alistLocks: newKeyedLocks()}
-	// Batch 29: remote (Alist) library scans dispatch through the
-	// scanner into the API layer, which owns the Alist client and
-	// the TMDB detail fill.
-	scanner.RemoteScan = s.scanAlistLibrary
+	s := &Server{st: st, scanner: scanner, defaultRoot: defaultRoot, fsRoot: fsRoot, imgLocks: newKeyedLocks(), running: map[string]bool{}, douban: meta.NewDoubanClient(), doubanBudget: doubanRoundBudget}
 	// A key (and the stable server id) exist from first start so the
 	// settings page always has something usable to show/copy.
 	_, _ = s.ensureAPIKey()
@@ -238,7 +221,8 @@ type libraryDTO struct {
 	Kind      string   `json:"Kind"`
 	Paths     []string `json:"Paths"`
 	ItemCount int      `json:"ItemCount"`
-	// SourceType is "local" or "alist" (batch 29).
+	// SourceType is always "local" (the libraries.source_type
+	// column is retained; remote library types were removed).
 	SourceType string `json:"SourceType"`
 	// Thumbs holds up to three backdrop-owning top-level item ids of the
 	// library (highest rated first) for the home page's library cards;
@@ -493,16 +477,17 @@ type libraryPayload struct {
 	Name  string   `json:"Name"`
 	Kind  string   `json:"Kind"`
 	Paths []string `json:"Paths"`
-	// SourceType is "local" (default) or "alist" (batch 29). An
-	// alist library stores exactly one remote root path.
+	// SourceType is accepted for compatibility but only "local"
+	// (or empty) is valid — remote library types were removed;
+	// anything else is a 400.
 	SourceType string `json:"SourceType"`
 }
 
 // parse validates and normalizes a library payload.
-func (p *libraryPayload) parse() (string, string, string, []string, error) {
+func (p *libraryPayload) parse() (string, string, []string, error) {
 	name := strings.TrimSpace(p.Name)
 	if name == "" {
-		return "", "", "", nil, errBad("library name is required")
+		return "", "", nil, errBad("library name is required")
 	}
 	kind := strings.ToLower(strings.TrimSpace(p.Kind))
 	if kind == "" {
@@ -511,44 +496,18 @@ func (p *libraryPayload) parse() (string, string, string, []string, error) {
 	switch kind {
 	case "movie", "series", "mixed":
 	default:
-		return "", "", "", nil, errBad("kind must be movie, series or mixed")
+		return "", "", nil, errBad("kind must be movie, series or mixed")
 	}
 	sourceType := strings.ToLower(strings.TrimSpace(p.SourceType))
-	if sourceType == "" {
-		sourceType = store.SourceTypeLocal
-	}
-	switch sourceType {
-	case store.SourceTypeLocal, store.SourceTypeAlist:
-	default:
-		return "", "", "", nil, errBad("sourceType must be local or alist")
-	}
-	if sourceType == store.SourceTypeAlist {
-		// Remote paths are Alist-side paths ("/电影/4K REMUX"): they
-		// are NOT local filesystem paths, so no filepath.Clean/IsAbs
-		// semantics apply — just trim and require a leading slash.
-		var paths []string
-		seen := map[string]bool{}
-		for _, raw := range p.Paths {
-			rp := strings.TrimRight(strings.TrimSpace(raw), "/")
-			if rp == "" || !strings.HasPrefix(rp, "/") {
-				return "", "", "", nil, errBad("alist path must be an absolute remote path: " + raw)
-			}
-			if !seen[rp] {
-				seen[rp] = true
-				paths = append(paths, rp)
-			}
-		}
-		if len(paths) != 1 {
-			return "", "", "", nil, errBad("an alist library has exactly one remote root path")
-		}
-		return name, kind, sourceType, paths, nil
+	if sourceType != "" && sourceType != store.SourceTypeLocal {
+		return "", "", nil, errBad("sourceType must be local")
 	}
 	var paths []string
 	seen := map[string]bool{}
 	for _, raw := range p.Paths {
 		clean := filepath.Clean(strings.TrimSpace(raw))
 		if clean == "." || !filepath.IsAbs(clean) {
-			return "", "", "", nil, errBad("paths must be absolute: " + raw)
+			return "", "", nil, errBad("paths must be absolute: " + raw)
 		}
 		if !seen[clean] {
 			seen[clean] = true
@@ -556,9 +515,9 @@ func (p *libraryPayload) parse() (string, string, string, []string, error) {
 		}
 	}
 	if len(paths) == 0 {
-		return "", "", "", nil, errBad("at least one root path is required")
+		return "", "", nil, errBad("at least one root path is required")
 	}
-	return name, kind, sourceType, paths, nil
+	return name, kind, paths, nil
 }
 
 type badRequest string
@@ -566,26 +525,26 @@ type badRequest string
 func errBad(msg string) error      { return badRequest(msg) }
 func (e badRequest) Error() string { return string(e) }
 
-func decodeLibraryPayload(w http.ResponseWriter, r *http.Request) (string, string, string, []string, bool) {
+func decodeLibraryPayload(w http.ResponseWriter, r *http.Request) (string, string, []string, bool) {
 	var p libraryPayload
 	if err := json.NewDecoder(r.Body).Decode(&p); err != nil {
 		writeErr(w, http.StatusBadRequest, "invalid JSON body")
-		return "", "", "", nil, false
+		return "", "", nil, false
 	}
-	name, kind, sourceType, paths, err := p.parse()
+	name, kind, paths, err := p.parse()
 	if err != nil {
 		writeErr(w, http.StatusBadRequest, err.Error())
-		return "", "", "", nil, false
+		return "", "", nil, false
 	}
-	return name, kind, sourceType, paths, true
+	return name, kind, paths, true
 }
 
 func (s *Server) handleLibraryCreate(w http.ResponseWriter, r *http.Request) {
-	name, kind, sourceType, paths, ok := decodeLibraryPayload(w, r)
+	name, kind, paths, ok := decodeLibraryPayload(w, r)
 	if !ok {
 		return
 	}
-	id, err := s.st.CreateLibraryWithType(name, kind, sourceType, paths)
+	id, err := s.st.CreateLibrary(name, kind, paths)
 	if err != nil {
 		if errors.Is(err, store.ErrPathOwned) {
 			writeErr(w, http.StatusConflict, err.Error())
@@ -626,11 +585,11 @@ func (s *Server) handleLibraryUpdate(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "bad library id")
 		return
 	}
-	name, kind, sourceType, paths, ok := decodeLibraryPayload(w, r)
+	name, kind, paths, ok := decodeLibraryPayload(w, r)
 	if !ok {
 		return
 	}
-	err = s.st.UpdateLibraryWithType(id, name, kind, sourceType, paths)
+	err = s.st.UpdateLibrary(id, name, kind, paths)
 	if errors.Is(err, sql.ErrNoRows) {
 		writeErr(w, http.StatusNotFound, "library not found")
 		return
@@ -1029,29 +988,6 @@ func (s *Server) serveItemStream(w http.ResponseWriter, r *http.Request, id int6
 		writeErr(w, http.StatusBadGateway, "no media source")
 		return
 	}
-	if s.itemIsAlist(it) {
-		// Alist item (batch 29): hand the source's file path to
-		// the raw-URL resolver. A folder-level source (batch 29c)
-		// is first resolved to its main file — the one moment an
-		// Alist folder listing is allowed, because a user just
-		// pressed play. No local fallback: any failure is a 502.
-		src, err := s.alistPlayableSource(it, srcs[0])
-		if err != nil {
-			log.Printf("stream: alist resolve item %d: %v", it.ID, err)
-			writeErr(w, http.StatusBadGateway, "alist playback resolve failed")
-			return
-		}
-		raw, err := s.alistRawURL(src.StrmPath)
-		if err != nil {
-			log.Printf("stream: alist resolve item %d: %v", it.ID, err)
-			writeErr(w, http.StatusBadGateway, "alist playback resolve failed")
-			return
-		}
-		w.Header().Set("Cache-Control", "no-store")
-		w.Header().Set("Location", raw)
-		w.WriteHeader(http.StatusFound)
-		return
-	}
 	target := readStrmTarget(srcs[0].StrmPath)
 	if target == "" {
 		writeErr(w, http.StatusBadGateway, "cannot read strm target")
@@ -1170,11 +1106,6 @@ type settingsDTO struct {
 	TMDBBaseURL     string `json:"tmdbBaseUrl"`
 	APIAuthRequired bool   `json:"apiAuthRequired"`
 	DoubanAssist    bool   `json:"doubanAssist"`
-	// Batch 29: Alist connection. The password is never returned —
-	// only whether one is stored.
-	AlistBaseURL     string `json:"alistBaseUrl"`
-	AlistUsername    string `json:"alistUsername"`
-	AlistPasswordSet bool   `json:"alistPasswordSet"`
 }
 
 func (s *Server) settingsDTO() (settingsDTO, error) {
@@ -1182,28 +1113,13 @@ func (s *Server) settingsDTO() (settingsDTO, error) {
 	if err != nil {
 		return settingsDTO{}, err
 	}
-	alistBase, err := s.st.GetSetting(settingAlistBaseURL)
-	if err != nil {
-		return settingsDTO{}, err
-	}
-	alistUser, err := s.st.GetSetting(settingAlistUsername)
-	if err != nil {
-		return settingsDTO{}, err
-	}
-	alistPass, err := s.st.GetSetting(settingAlistPassword)
-	if err != nil {
-		return settingsDTO{}, err
-	}
 	// Only whether a key exists is exposed — never the key itself. The
 	// base URL reported is the effective one (official default included).
 	return settingsDTO{
-		TMDBKeySet:       cfg.key != "",
-		TMDBBaseURL:      cfg.base,
-		APIAuthRequired:  s.authRequired(),
-		DoubanAssist:     s.doubanAssistEnabled(),
-		AlistBaseURL:     alistBase,
-		AlistUsername:    alistUser,
-		AlistPasswordSet: alistPass != "",
+		TMDBKeySet:      cfg.key != "",
+		TMDBBaseURL:     cfg.base,
+		APIAuthRequired: s.authRequired(),
+		DoubanAssist:    s.doubanAssistEnabled(),
 	}, nil
 }
 
@@ -1223,9 +1139,6 @@ func (s *Server) handleSettingsPut(w http.ResponseWriter, r *http.Request) {
 		TMDBBaseURL     *string `json:"tmdbBaseUrl"`
 		APIAuthRequired *bool   `json:"apiAuthRequired"`
 		DoubanAssist    *bool   `json:"doubanAssist"`
-		AlistBaseURL    *string `json:"alistBaseUrl"`
-		AlistUsername   *string `json:"alistUsername"`
-		AlistPassword   *string `json:"alistPassword"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&p); err != nil {
 		writeErr(w, http.StatusBadRequest, "invalid JSON body")
@@ -1269,29 +1182,6 @@ func (s *Server) handleSettingsPut(w http.ResponseWriter, r *http.Request) {
 			v = "true"
 		}
 		if err := s.st.SetSetting(settingDoubanAssist, v); err != nil {
-			writeErr(w, http.StatusInternalServerError, err.Error())
-			return
-		}
-	}
-	// Batch 29: Alist connection. Base URL and username are stored
-	// as given (empty clears them); the password follows the
-	// tmdbBaseUrl rule — an empty value never overwrites the stored
-	// one, so a save issued before the form finished loading cannot
-	// wipe it.
-	if p.AlistBaseURL != nil {
-		if err := s.st.SetSetting(settingAlistBaseURL, strings.TrimRight(strings.TrimSpace(*p.AlistBaseURL), "/")); err != nil {
-			writeErr(w, http.StatusInternalServerError, err.Error())
-			return
-		}
-	}
-	if p.AlistUsername != nil {
-		if err := s.st.SetSetting(settingAlistUsername, strings.TrimSpace(*p.AlistUsername)); err != nil {
-			writeErr(w, http.StatusInternalServerError, err.Error())
-			return
-		}
-	}
-	if p.AlistPassword != nil && *p.AlistPassword != "" {
-		if err := s.st.SetSetting(settingAlistPassword, *p.AlistPassword); err != nil {
 			writeErr(w, http.StatusInternalServerError, err.Error())
 			return
 		}

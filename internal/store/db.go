@@ -58,12 +58,9 @@ func Open(path string) (*Store, error) {
 	}
 	// Migration: media_sources gained the full stream payload
 	// (streams_json/size_bytes/bitrate) for rich client media info,
-	// and later a resolved flag (batch 29c): Alist sources are
-	// scanned from the folder NAME alone (resolved = 0, strm_path =
-	// the folder) and only resolved to a concrete file at playback
-	// time. The default 1 keeps every pre-existing row — all local
-	// sources and old-model Alist sources whose strm_path already
-	// names a file — resolved, as they are.
+	// and later a resolved flag (batch 29c, for the since-removed
+	// remote library type). The default 1 keeps every pre-existing
+	// row resolved, as they are; local sources are always resolved.
 	for _, col := range []struct{ name, ddl string }{
 		{"streams_json", `ALTER TABLE media_sources ADD COLUMN streams_json TEXT NOT NULL DEFAULT ''`},
 		{"size_bytes", `ALTER TABLE media_sources ADD COLUMN size_bytes INTEGER NOT NULL DEFAULT 0`},
@@ -178,9 +175,9 @@ func Open(path string) (*Store, error) {
 			return nil, fmt.Errorf("migrate libraries sort_order values: %w", err)
 		}
 	}
-	// Migration (batch 29): libraries gained source_type — 'local'
-	// (default; roots are local folders) or 'alist' (the single root
-	// is a remote path on an Alist server).
+	// Migration (batch 29): libraries gained source_type. Only
+	// 'local' exists now (roots are local folders); the column is
+	// retained for schema compatibility.
 	has, err = columnExists(db, "libraries", "source_type")
 	if err != nil {
 		db.Close()
@@ -316,7 +313,7 @@ CREATE TABLE IF NOT EXISTS media_sources (
   streams_json     TEXT NOT NULL DEFAULT '',
   size_bytes       INTEGER NOT NULL DEFAULT 0,
   bitrate          INTEGER NOT NULL DEFAULT 0,
-  resolved         INTEGER NOT NULL DEFAULT 1  -- batch 29c: 0 = Alist folder-level source, resolved to a file at playback time
+  resolved         INTEGER NOT NULL DEFAULT 1  -- batch 29c legacy flag; local sources are always 1
 );
 CREATE INDEX IF NOT EXISTS idx_ms_item ON media_sources(item_id);
 

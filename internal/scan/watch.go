@@ -88,9 +88,6 @@ func (w *Watcher) refreshRoots() {
 	roots := map[string]int64{}
 	var parts []string
 	for _, lib := range libs {
-		if lib.SourceType == store.SourceTypeAlist {
-			continue // remote roots cannot be watched (batch 29)
-		}
 		for _, p := range lib.Paths {
 			cp := filepath.Clean(p)
 			roots[cp] = lib.ID

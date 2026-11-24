@@ -10,13 +10,11 @@ import (
 	"strings"
 )
 
-// Library source types (batch 29): local libraries scan local
-// folders; alist libraries have exactly one remote root path on an
-// Alist server and are scanned/played through its API.
-const (
-	SourceTypeLocal = "local"
-	SourceTypeAlist = "alist"
-)
+// SourceTypeLocal is the only library source type: libraries scan
+// local folders. The libraries.source_type column is retained in
+// the schema (remote library types existed briefly and were
+// removed); every library is local.
+const SourceTypeLocal = "local"
 
 // Library is a managed collection of one or more root paths
 // (e.g. 动画电影) of kind movie|series|mixed.
@@ -29,7 +27,7 @@ type Library struct {
 	// SortOrder is the display order on the home page (batch 28);
 	// lower comes first. Edited via SetLibraryOrder.
 	SortOrder int
-	// SourceType is SourceTypeLocal or SourceTypeAlist (batch 29).
+	// SourceType is always SourceTypeLocal (see the constant).
 	SourceType string
 }
 
@@ -85,11 +83,10 @@ type MediaSource struct {
 	StreamsJSON string
 	SizeBytes   int64
 	Bitrate     int
-	// Resolved is false only for Alist sources written by the
-	// name-only scan (batch 29c): StrmPath then names the title
-	// FOLDER, and the concrete file is picked at playback time and
-	// written back with Resolved = true. Every local source and
-	// every pre-29c Alist source is resolved.
+	// Resolved mirrors the media_sources.resolved column. Local
+	// sources are always resolved (the flag distinguished
+	// folder-level remote sources while remote libraries existed;
+	// the column is retained, local behaviour never reads it).
 	Resolved bool
 }
 
@@ -223,15 +220,7 @@ func (s *Store) checkPathsFree(paths []string, excludeID int64) error {
 
 // CreateLibrary inserts a new local library with the given root paths.
 func (s *Store) CreateLibrary(name, kind string, paths []string) (int64, error) {
-	return s.CreateLibraryWithType(name, kind, SourceTypeLocal, paths)
-}
-
-// CreateLibraryWithType inserts a new library of the given source
-// type (batch 29). An unknown/empty source type is treated as local.
-func (s *Store) CreateLibraryWithType(name, kind, sourceType string, paths []string) (int64, error) {
-	if sourceType != SourceTypeAlist {
-		sourceType = SourceTypeLocal
-	}
+	sourceType := SourceTypeLocal
 	if err := s.checkPathsFree(paths, 0); err != nil {
 		return 0, err
 	}
@@ -263,15 +252,7 @@ func (s *Store) CreateLibraryWithType(name, kind, sourceType string, paths []str
 
 // UpdateLibrary replaces a local library's name, kind and root paths.
 func (s *Store) UpdateLibrary(id int64, name, kind string, paths []string) error {
-	return s.UpdateLibraryWithType(id, name, kind, SourceTypeLocal, paths)
-}
-
-// UpdateLibraryWithType replaces a library's name, kind, source type
-// and root paths (batch 29).
-func (s *Store) UpdateLibraryWithType(id int64, name, kind, sourceType string, paths []string) error {
-	if sourceType != SourceTypeAlist {
-		sourceType = SourceTypeLocal
-	}
+	sourceType := SourceTypeLocal
 	if err := s.checkPathsFree(paths, id); err != nil {
 		return err
 	}

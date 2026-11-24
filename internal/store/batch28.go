@@ -117,21 +117,15 @@ type PendingSource struct {
 }
 
 // PendingMediaInfoSources lists sources whose mediainfo_source is
-// 'filename' or 'none', oldest first, capped at limit. Alist
-// libraries are excluded outright (batch 29c): their sources are
-// remote paths — stage ① must never trigger an Alist rescan and
-// stage ② must never ffprobe one (probing would mean opening the
-// remote file, which the Alist model forbids outside playback).
+// 'filename' or 'none', oldest first, capped at limit.
 func (s *Store) PendingMediaInfoSources(limit int) ([]PendingSource, error) {
 	if limit <= 0 {
 		limit = 30
 	}
 	rows, err := s.db.Query(`SELECT ms.id, ms.item_id, i.library_id, ms.strm_path, ms.target_url
 		FROM media_sources ms JOIN items i ON i.id = ms.item_id
-		JOIN libraries l ON l.id = i.library_id
 		WHERE ms.mediainfo_source IN ('filename', 'none')
-		  AND l.source_type <> ?
-		ORDER BY ms.id LIMIT ?`, SourceTypeAlist, limit)
+		ORDER BY ms.id LIMIT ?`, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -148,14 +142,12 @@ func (s *Store) PendingMediaInfoSources(limit int) ([]PendingSource, error) {
 }
 
 // CountPendingMediaInfo counts the sources PendingMediaInfoSources
-// would return without a limit (Alist libraries excluded, as there).
+// would return without a limit.
 func (s *Store) CountPendingMediaInfo() (int, error) {
 	var n int
 	err := s.db.QueryRow(`SELECT COUNT(*) FROM media_sources ms
 		JOIN items i ON i.id = ms.item_id
-		JOIN libraries l ON l.id = i.library_id
-		WHERE ms.mediainfo_source IN ('filename', 'none')
-		  AND l.source_type <> ?`, SourceTypeAlist).Scan(&n)
+		WHERE ms.mediainfo_source IN ('filename', 'none')`).Scan(&n)
 	return n, err
 }
 

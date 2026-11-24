@@ -58,10 +58,6 @@ type Scanner struct {
 	st        *store.Store
 	providers []meta.MediaInfoProvider
 
-	// RemoteScan, when set, handles libraries whose source type is
-	// not local (batch 29: Alist). Wired by the API layer.
-	RemoteScan RemoteScanFunc
-
 	// forceFull is armed for the duration of a run whose stored
 	// scan-logic version lags CurrentScanLogicVersion.
 	forceFull bool
@@ -74,21 +70,6 @@ type Scanner struct {
 	mu     sync.Mutex
 	status Status
 }
-
-// RemoteResult carries the counters of one remote (Alist) library
-// scan back into the shared scan status (batch 29).
-type RemoteResult struct {
-	Items   int
-	Skipped int
-	Deleted int
-}
-
-// RemoteScanFunc scans one non-local library. It is injected by the
-// API layer (which owns the Alist client and the TMDB fill); the
-// scanner itself only dispatches and folds the counters into the
-// status, so every entry point (manual, full scan, scheduled job)
-// routes remote libraries correctly.
-type RemoteScanFunc func(lib store.Library) (RemoteResult, error)
 
 // New builds a Scanner with the local sidecar media-info provider.
 func New(st *store.Store) *Scanner {
@@ -286,11 +267,6 @@ type rootOwner struct {
 func buildOwners(libs []store.Library) []rootOwner {
 	var out []rootOwner
 	for _, l := range libs {
-		if l.SourceType == store.SourceTypeAlist {
-			// Remote roots are not local paths: they must never
-			// claim ownership of a local folder (batch 29).
-			continue
-		}
 		for _, p := range l.Paths {
 			out = append(out, rootOwner{libID: l.ID, path: filepath.Clean(p)})
 		}
@@ -367,20 +343,6 @@ type folderCtx struct {
 // scan reprocesses every item (see beginRun) and writes the new version
 // back on success.
 func (s *Scanner) scanLibrary(lib store.Library, owners []rootOwner) error {
-	if lib.SourceType == store.SourceTypeAlist {
-		// Remote libraries dispatch to the injected remote scanner
-		// (batch 29); the local walk below never sees them.
-		if s.RemoteScan == nil {
-			return fmt.Errorf("library %d: alist scan not wired", lib.ID)
-		}
-		res, err := s.RemoteScan(lib)
-		s.bump(func(st *Status) {
-			st.Items += res.Items
-			st.Skipped += res.Skipped
-			st.Deleted += res.Deleted
-		})
-		return err
-	}
 	force := s.beginRun(lib.ID)
 	defer func() { s.forceFull = false }()
 	index, err := s.st.LoadIndex(lib.ID)
