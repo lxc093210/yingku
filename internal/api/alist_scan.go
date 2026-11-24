@@ -28,6 +28,12 @@ const (
 // inside their validity while sparing the API a call per play).
 const rawURLCacheTTL = 5 * time.Minute
 
+// alistScanBatchSize is how many prepped folders one write
+// transaction covers. Prep (network + matching) for a batch runs
+// with NO transaction open; 100 keeps a single batch's prep time
+// bounded while the write phase stays a short burst.
+const alistScanBatchSize = 100
+
 type rawURLEntry struct {
 	url string
 	at  time.Time
@@ -151,53 +157,55 @@ func (s *Server) scanAlistLibrary(lib store.Library) (scan.RemoteResult, error) 
 	now := time.Now().Unix()
 	seen := make(map[string]struct{}, len(entries))
 
-	// Batched writes through store.Tx, mirroring the local scanner's
-	// writer: nothing else touches the store while a batch is open.
-	var tx *store.Tx
-	ops := 0
-	flush := func() error {
-		if tx == nil {
-			return nil
-		}
-		err := tx.Commit()
-		tx = nil
-		ops = 0
-		return err
-	}
-	defer func() {
-		if tx != nil {
-			_ = tx.Rollback()
-		}
-	}()
-	writeOne := func(it *store.Item, src store.MediaSource) (int64, error) {
-		if tx == nil {
-			t, err := s.st.Begin()
-			if err != nil {
-				return 0, err
-			}
-			tx = t
-		}
-		id, err := tx.UpsertItem(it)
-		if err != nil {
-			return 0, err
-		}
-		if err := tx.ReplaceSources(id, []store.MediaSource{src}); err != nil {
-			return 0, err
-		}
-		ops++
-		if ops >= 500 {
-			if err := flush(); err != nil {
-				return 0, err
-			}
-		}
-		return id, nil
-	}
-
+	// Writes are strictly two-phase per batch (batch-29 fix): the
+	// prep phase below does ALL network and compute work (Alist
+	// listings, filename parsing, TMDB matching) and assembles the
+	// rows in memory WITHOUT opening a store transaction — the
+	// store has a single connection (MaxOpenConns(1)), so a Tx held
+	// open across network calls starves the whole API. Only when a
+	// batch is fully prepped does flushBatch open a Tx, write the
+	// rows as fast as SQLite allows, and commit immediately. The
+	// existing-item fingerprint index was loaded once, before the
+	// loop (LoadIndex above), so prep never touches the store.
 	type matchedRef struct {
 		id     int64
 		tmdbID int
 	}
 	var matched []matchedRef
+
+	type preparedWrite struct {
+		it  *store.Item
+		src store.MediaSource
+	}
+	var pending []preparedWrite
+	flushBatch := func() error {
+		if len(pending) == 0 {
+			return nil
+		}
+		tx, err := s.st.Begin()
+		if err != nil {
+			return err
+		}
+		for _, p := range pending {
+			id, err := tx.UpsertItem(p.it)
+			if err != nil {
+				_ = tx.Rollback()
+				return err
+			}
+			if err := tx.ReplaceSources(id, []store.MediaSource{p.src}); err != nil {
+				_ = tx.Rollback()
+				return err
+			}
+			if p.it.TmdbID > 0 {
+				matched = append(matched, matchedRef{id: id, tmdbID: p.it.TmdbID})
+			}
+		}
+		if err := tx.Commit(); err != nil {
+			return err
+		}
+		pending = pending[:0]
+		return nil
+	}
 
 	for _, e := range entries {
 		if !e.IsDir {
@@ -286,17 +294,18 @@ func (s *Server) scanAlistLibrary(lib store.Library) (scan.RemoteResult, error) 
 			MediaInfoSource: mi.Source,
 			SizeBytes:       best.Size,
 		}
-		id, err := writeOne(it, src)
-		if err != nil {
-			return res, fmt.Errorf("alist scan lib %d: write %s: %w", lib.ID, folderPath, err)
-		}
+		// Prep only: queue the row; the write happens in
+		// flushBatch once the batch is fully prepped.
+		pending = append(pending, preparedWrite{it: it, src: src})
 		seen[folderPath] = struct{}{}
 		res.Items++
-		if tmdbID > 0 {
-			matched = append(matched, matchedRef{id: id, tmdbID: tmdbID})
+		if len(pending) >= alistScanBatchSize {
+			if err := flushBatch(); err != nil {
+				return res, fmt.Errorf("alist scan lib %d: commit batch: %w", lib.ID, err)
+			}
 		}
 	}
-	if err := flush(); err != nil {
+	if err := flushBatch(); err != nil {
 		return res, fmt.Errorf("alist scan lib %d: commit: %w", lib.ID, err)
 	}
 

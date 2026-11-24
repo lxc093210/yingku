@@ -7,7 +7,9 @@ import (
 	"net/http/httptest"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"yingku/internal/scan"
 	"yingku/internal/store"
@@ -358,4 +360,140 @@ func keysOf(m map[string]*store.Item) []string {
 		out = append(out, k)
 	}
 	return out
+}
+
+// blockingTMDBServer is a TMDB fake whose search for 阻塞片 parks on
+// a channel until the test releases it, so the test can observe the
+// store while a remote scan is deterministically mid-prep.
+func blockingTMDBServer(t *testing.T, entered chan<- struct{}, release <-chan struct{}) *httptest.Server {
+	t.Helper()
+	var once sync.Once
+	mux := http.NewServeMux()
+	mux.HandleFunc("/search/movie", func(w http.ResponseWriter, r *http.Request) {
+		q := r.URL.Query().Get("query")
+		switch q {
+		case "阻塞片":
+			once.Do(func() { close(entered) })
+			<-release
+			_ = json.NewEncoder(w).Encode(map[string]any{"results": []map[string]any{
+				{"id": 44, "title": "阻塞片", "original_title": "Blocker", "release_date": "2021-03-01"},
+			}})
+		case "精确片":
+			_ = json.NewEncoder(w).Encode(map[string]any{"results": []map[string]any{
+				{"id": 42, "title": "精确片", "original_title": "Exact", "release_date": "2020-05-01"},
+			}})
+		default:
+			_ = json.NewEncoder(w).Encode(map[string]any{"results": []any{}})
+		}
+	})
+	mux.HandleFunc("/movie/", func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/images") {
+			_ = json.NewEncoder(w).Encode(map[string]any{"posters": []any{}, "backdrops": []any{}})
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"title": "片", "overview": "简介", "vote_average": 7.0, "runtime": 100,
+			"genres": []map[string]any{},
+		})
+	})
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+	return srv
+}
+
+// TestAlistScanPrepDoesNotHoldStoreConnection is the regression test
+// for the batch-29 defect: the remote scan used to keep a store.Tx
+// open across TMDB network calls, and with MaxOpenConns(1) that
+// starved every other store user (the whole API) for the length of
+// a batch. The scan must prep with no transaction open: while a
+// TMDB search is parked mid-scan, a store read must still complete.
+func TestAlistScanPrepDoesNotHoldStoreConnection(t *testing.T) {
+	const root = "/电影/4K REMUX"
+	tree := fakeAlistTree{
+		root: {
+			{Name: "精确片 4K REMUX（2020）", IsDir: true},
+			{Name: "阻塞片 4K REMUX（2021）", IsDir: true},
+		},
+		root + "/精确片 4K REMUX（2020）": {
+			{Name: "Exact.2020.2160p.REMUX.mkv", Size: 20_000_000_000},
+		},
+		root + "/阻塞片 4K REMUX（2021）": {
+			{Name: "Blocker.2021.2160p.REMUX.mkv", Size: 20_000_000_000},
+		},
+	}
+	alistSrv := fakeAlistServer(t, tree)
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	tmdbSrv := blockingTMDBServer(t, entered, release)
+
+	st, err := store.Open(filepath.Join(t.TempDir(), "test.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { st.Close() })
+	for k, v := range map[string]string{
+		settingAlistBaseURL:  alistSrv.URL,
+		settingAlistUsername: "dav",
+		settingAlistPassword: "pw",
+		settingTMDBBaseURL:   tmdbSrv.URL,
+	} {
+		if err := st.SetSetting(k, v); err != nil {
+			t.Fatal(err)
+		}
+	}
+	libID, err := st.CreateLibraryWithType("4K REMUX", "movie", store.SourceTypeAlist, []string{root})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sc := scan.New(st)
+	_ = New(st, sc, t.TempDir()) // wires scanner.RemoteScan
+
+	scanDone := make(chan error, 1)
+	go func() { scanDone <- sc.ScanLibraryByID(libID) }()
+
+	// Wait until the scan is deterministically parked inside the
+	// TMDB search for the second folder — i.e. the first folder has
+	// been fully prepped and the scan is mid-prep for the batch.
+	select {
+	case <-entered:
+	case <-time.After(10 * time.Second):
+		t.Fatal("scan never reached the blocking TMDB search")
+	}
+
+	// A store read must complete promptly even though the scan is
+	// in flight: prep holds no transaction, so the single store
+	// connection is free.
+	readDone := make(chan error, 1)
+	go func() {
+		_, err := st.GetLibrary(libID)
+		readDone <- err
+	}()
+	select {
+	case err := <-readDone:
+		if err != nil {
+			t.Fatalf("store read during scan prep: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("store read blocked >2s during scan prep: a transaction is being held open across network calls")
+	}
+
+	close(release)
+	select {
+	case err := <-scanDone:
+		if err != nil {
+			t.Fatalf("remote scan: %v", err)
+		}
+	case <-time.After(15 * time.Second):
+		t.Fatal("scan did not finish after the TMDB search was released")
+	}
+	if got := sc.Status().Items; got != 2 {
+		t.Errorf("scan items = %d, want 2", got)
+	}
+	items, _, err := st.ListTopLevel(libID, "", "", 50)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != 2 {
+		t.Errorf("items in store = %d, want 2", len(items))
+	}
 }
