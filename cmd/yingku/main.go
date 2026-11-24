@@ -5,6 +5,7 @@
 package main
 
 import (
+	"context"
 	"log"
 	"net/http"
 	"os"
@@ -35,6 +36,11 @@ func main() {
 
 	scanner := scan.New(st)
 	handler := api.New(st, scanner, library)
+
+	// Real-time folder monitoring: disk changes under any library
+	// root debounce into an incremental scan of that library, so
+	// additions and deletions show up without a manual rescan.
+	scan.NewWatcher(st, scanner).Start(context.Background())
 
 	srv := &http.Server{
 		Addr:              addr,

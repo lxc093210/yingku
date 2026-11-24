@@ -40,6 +40,7 @@ type Status struct {
 	Skipped   int    `json:"skipped"`  // unchanged items skipped
 	Deleted   int    `json:"deleted"`  // vanished items deleted
 	Error     string `json:"error,omitempty"`
+	WatchDirs int    `json:"watchDirs"` // directories under inotify watch (0 = watcher off)
 }
 
 // CurrentScanLogicVersion is bumped whenever scanning logic changes in a
